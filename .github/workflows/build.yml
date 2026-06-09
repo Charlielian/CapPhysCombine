@@ -1,0 +1,81 @@
+name: Build EXE
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          architecture: 'x64'
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Build EXE with PyInstaller
+        run: pyinstaller CapPhysCombine.spec
+
+      - name: Create data directory placeholder
+        run: |
+          mkdir dist\CapPhysCombine\data
+          echo "将源数据 Excel 文件放入此目录" > dist\CapPhysCombine\data\请将数据文件放入此目录.txt
+
+      - name: Package as ZIP
+        run: |
+          cd dist
+          7z a CapPhysCombine.zip CapPhysCombine
+
+      - name: Get version from tag
+        id: get_version
+        shell: bash
+        run: |
+          if [[ "${GITHUB_REF}" == refs/tags/v* ]]; then
+            echo "VERSION=${GITHUB_REF#refs/tags/}" >> $GITHUB_OUTPUT
+          else
+            echo "VERSION=dev-$(date +%Y%m%d)" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Create Release
+        uses: softprops/action-gh-release@v2
+        with:
+          name: CapPhysCombine ${{ steps.get_version.outputs.VERSION }}
+          body: |
+            ## 容量表合成工具 ${{ steps.get_version.outputs.VERSION }}
+
+            ### 使用说明
+            1. 下载并解压 `CapPhysCombine.zip`
+            2. 将源数据 Excel 文件放入 `data/` 目录
+            3. 运行 `CapPhysCombine.exe`
+            4. 点击"开始生成"按钮
+
+            ### 数据文件要求
+            将以下 Excel 文件放入 `data/` 目录：
+            - `5G小区容量-周*.xlsx`
+            - `5G小区容量报表*.xlsx`
+            - `5GMR覆盖-小区天*.xlsx`
+            - `5G小区性能KPI报表*.xlsx`
+            - `重要场景-周*.xlsx`
+            - `重要场景-天*.xlsx`
+            - `4GMR覆盖-小区天*.xlsx`
+          files: |
+            dist/CapPhysCombine.zip
+          draft: false
+          prerelease: false
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
