@@ -37,11 +37,12 @@ jobs:
           copy C:\Windows\System32\vcruntime140_1.dll dist\CapPhysCombine\
           copy C:\Windows\System32\msvcp140.dll dist\CapPhysCombine\
 
-      - name: Create data directory placeholder
+      - name: Create data directory placeholder and copy instructions
         run: |
           mkdir dist\CapPhysCombine\data
           echo "将源数据 Excel 文件放入此目录" > dist\CapPhysCombine\data\请将数据文件放入此目录.txt
           mkdir dist\CapPhysCombine\logs
+          copy 操作说明.txt dist\CapPhysCombine\
 
       - name: Package as ZIP
         run: |
