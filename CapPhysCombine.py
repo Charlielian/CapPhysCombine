@@ -38,6 +38,7 @@ FILE_PATTERNS = {
     "4g_week": "重要场景-周*.xlsx",
     "4g_day": "重要场景-天*.xlsx",
     "4g_mr": "4GMR覆盖-小区天*.xlsx",
+    "cog_coverage": "共站同覆盖小区_4g_5g.xlsx",
 }
 
 OUTPUT_5G = BASE_DIR / "合成_容量表_5G.xlsx"
@@ -160,12 +161,47 @@ def pick_latest_file(pattern: str) -> Path:
     return max(matches, key=sort_key)
 
 
+def load_cog_coverage_mapping(logger: GuiLogger | None = None) -> pd.DataFrame:
+    """加载共站同覆盖小区表，返回 CGI -> 共站同覆盖名 的映射表"""
+    logger = logger or GuiLogger()
+    
+    pattern = FILE_PATTERNS.get("cog_coverage")
+    if not pattern:
+        return pd.DataFrame(columns=["CGI", "共站同覆盖名"])
+    
+    matches = list(DATA_DIR.glob(pattern))
+    if not matches:
+        logger.log("未找到共站同覆盖小区文件，跳过扇区更新")
+        return pd.DataFrame(columns=["CGI", "共站同覆盖名"])
+    
+    path = matches[0]
+    logger.log(f"加载共站同覆盖小区表: {path.name}")
+    
+    df = pd.read_excel(path, dtype_backend="numpy_nullable")
+    
+    # 确保必要的列存在
+    if "CGI" not in df.columns or "共站同覆盖名" not in df.columns:
+        logger.log("共站同覆盖小区表缺少必要列，跳过扇区更新")
+        return pd.DataFrame(columns=["CGI", "共站同覆盖名"])
+    
+    # 需要映射的额外字段
+    extra_cols = ["路测网格", "乡镇街道", "是否覆盖层", "小区所属区域"]
+    extra_cols = [col for col in extra_cols if col in df.columns]
+    
+    # 保留需要的列，去重（同一个CGI可能有多条记录，取第一个）
+    cols_to_keep = ["CGI", "共站同覆盖名"] + extra_cols
+    mapping = df[cols_to_keep].drop_duplicates(subset=["CGI"], keep="first")
+    mapping["CGI"] = mapping["CGI"].astype(str)
+    
+    logger.log(f"共站同覆盖映射表加载完成，共 {len(mapping)} 条映射，额外字段: {extra_cols}")
+    return mapping
+
+
 def read_excel(path: Path) -> pd.DataFrame:
-    """快速读取 Excel 文件，使用只读模式提升大文件读取性能"""
+    """快速读取 Excel 文件"""
     return pd.read_excel(
         path,
         engine="openpyxl",
-        read_only=True,
         dtype_backend="numpy_nullable",
     )
 
@@ -227,19 +263,63 @@ def default_output_paths() -> dict[str, Path]:
 
 def load_sources(logger: GuiLogger | None = None) -> dict[str, pd.DataFrame]:
     logger = logger or GuiLogger()
-    selected = {name: pick_latest_file(pattern) for name, pattern in FILE_PATTERNS.items()}
+    
+    # 加载共站同覆盖小区表（独立处理，不走 pick_latest_file）
+    sources: dict[str, pd.DataFrame] = {}
+    
+    # 加载共站同覆盖映射表
+    sources["cog_coverage"] = load_cog_coverage_mapping(logger)
+    
+    # 加载其他源文件
+    patterns_to_load = {
+        name: pattern for name, pattern in FILE_PATTERNS.items() 
+        if name != "cog_coverage"
+    }
+    
+    selected = {name: pick_latest_file(pattern) for name, pattern in patterns_to_load.items()}
     logger.log("使用以下源文件：")
     for name, path in selected.items():
         logger.log(f"- {name}: {path.name}")
 
-    sources: dict[str, pd.DataFrame] = {}
     total = len(selected)
     for index, (name, path) in enumerate(selected.items(), start=1):
         logger.log(f"开始解析 [{index}/{total}] {name}: {path.name}")
-        frame = read_excel(path)
+        start = time.perf_counter()
+        frame = pd.read_excel(path, engine="openpyxl", dtype_backend="numpy_nullable")
+        elapsed = time.perf_counter() - start
         sources[name] = frame
-        logger.log(f"解析完成 [{index}/{total}] {name}: {len(frame)} 行 x {len(frame.columns)} 列")
+        logger.log(f"解析完成 [{index}/{total}] {name}: {len(frame)} 行 x {len(frame.columns)} 列 (耗时 {elapsed:.1f}s)")
     return sources
+
+
+def apply_sector_mapping(table: pd.DataFrame, mapping: pd.DataFrame, cgi_column: str, logger: GuiLogger | None = None) -> pd.DataFrame:
+    """用共站同覆盖映射表更新容量表的扇区字段"""
+    logger = logger or GuiLogger()
+    
+    if mapping.empty or cgi_column not in table.columns:
+        logger.log(f"跳过扇区更新（CGI列: {cgi_column}）")
+        return table
+    
+    table = table.copy()
+    table[cgi_column] = table[cgi_column].astype(str)
+    
+    # 需要映射的字段列表
+    mapping_cols = ["共站同覆盖名", "路测网格", "乡镇街道", "是否覆盖层", "小区所属区域"]
+    mapping_cols = [col for col in mapping_cols if col in mapping.columns]
+    
+    # 遍历映射每个字段
+    for col in mapping_cols:
+        # 创建映射字典
+        col_mapping = dict(zip(mapping["CGI"], mapping[col]))
+        target_col = "扇区" if col == "共站同覆盖名" else col
+        if target_col not in table.columns:
+            table[target_col] = pd.NA
+        original_count = table[target_col].notna().sum()
+        table[target_col] = table[cgi_column].map(col_mapping)
+        updated_count = table[target_col].notna().sum()
+        logger.log(f"字段 [{target_col}] 更新完成: 匹配 {updated_count} 条（新增 {updated_count - original_count} 条）")
+    
+    return table
 
 
 def build_5g_table(sources: dict[str, pd.DataFrame]) -> pd.DataFrame:
@@ -396,7 +476,6 @@ def build_5g_table(sources: dict[str, pd.DataFrame]) -> pd.DataFrame:
         "流量系数",
         "物理站",
     ]
-    result["扇区"] = pd.NA
     return result.reindex(columns=ordered_columns)
 
 
@@ -507,7 +586,6 @@ def build_4g_table(sources: dict[str, pd.DataFrame]) -> pd.DataFrame:
     result["地市"] = first_existing(result, ["所属地市"])
     result["网元状态"] = first_existing(result, ["网元状态"])
     result["小区名称"] = first_existing(result, ["小区名称"])
-    result["扇区"] = pd.NA
     result["band"] = first_existing(result, ["使用频段", "频点"])
     result["场景 V容量表"] = first_existing(result, ["场景"])
     result["TYPE"] = pd.NA
@@ -619,28 +697,55 @@ def run_pipeline(
         logger.log("未从周表中识别到开始/结束时间，输出文件将使用默认文件名")
 
     logger.log("开始生成 5G 容量表")
+    start = time.perf_counter()
     table_5g = build_5g_table(sources)
+    elapsed = time.perf_counter() - start
     progress.update(42, f"5G表生成完成，共 {len(table_5g)} 条")
+    logger.log(f"5G 容量表生成完成 (耗时 {elapsed:.1f}s)")
+
+    # 使用共站同覆盖表更新5G表扇区及额外字段
+    cog_mapping = sources.get("cog_coverage")
+    if cog_mapping is not None and not cog_mapping.empty:
+        table_5g = apply_sector_mapping(table_5g, cog_mapping, "NCGI", logger)
 
     logger.log("开始生成 4G 容量表")
+    start = time.perf_counter()
     table_4g = build_4g_table(sources)
+    elapsed = time.perf_counter() - start
     progress.update(66, f"4G表生成完成，共 {len(table_4g)} 条")
+    logger.log(f"4G 容量表生成完成 (耗时 {elapsed:.1f}s)")
+
+    # 使用共站同覆盖表更新4G表扇区及额外字段
+    if cog_mapping is not None and not cog_mapping.empty:
+        table_4g = apply_sector_mapping(table_4g, cog_mapping, "CGI", logger)
 
     logger.log("开始合并 45G 总表")
+    start = time.perf_counter()
     table_45g = build_45g_table(table_5g, table_4g)
+    elapsed = time.perf_counter() - start
     progress.update(80, f"45G总表生成完成，共 {len(table_45g)} 条")
+    logger.log(f"45G 总表生成完成 (耗时 {elapsed:.1f}s)")
 
     logger.log(f"开始写出文件: {output_paths['5g'].name}")
+    start = time.perf_counter()
     table_5g.to_excel(output_paths["5g"], index=False)
+    elapsed = time.perf_counter() - start
     progress.update(88, f"已生成: {output_paths['5g'].name}")
+    logger.log(f"写出 {output_paths['5g'].name} 完成 (耗时 {elapsed:.1f}s)")
 
     logger.log(f"开始写出文件: {output_paths['4g'].name}")
+    start = time.perf_counter()
     table_4g.to_excel(output_paths["4g"], index=False)
+    elapsed = time.perf_counter() - start
     progress.update(94, f"已生成: {output_paths['4g'].name}")
+    logger.log(f"写出 {output_paths['4g'].name} 完成 (耗时 {elapsed:.1f}s)")
 
     logger.log(f"开始写出文件: {output_paths['45g'].name}")
+    start = time.perf_counter()
     table_45g.to_excel(output_paths["45g"], index=False)
+    elapsed = time.perf_counter() - start
     progress.update(100, f"已生成: {output_paths['45g'].name}")
+    logger.log(f"写出 {output_paths['45g'].name} 完成 (耗时 {elapsed:.1f}s)")
 
     elapsed_seconds = time.perf_counter() - started_at
     logger.log(f"5G表记录数: {len(table_5g)}")

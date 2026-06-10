@@ -1,0 +1,23 @@
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+
+# Output files
+合成_容量表_*.xlsx
+容量表_45G*.xlsx
+.~*.xlsx
+
+# Data and logs (user-specific)
+data/
+logs/
+
+# macOS
+.DS_Store
+
+# PyInstaller build
+dist/
+build/
+*.spec.bak

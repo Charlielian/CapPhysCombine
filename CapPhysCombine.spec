@@ -13,7 +13,7 @@ block_cipher = None
 PROJECT_ROOT = Path(SPECPATH)
 
 a = Analysis(
-    [str(PROJECT_ROOT / '合成流量表.py')],
+    [str(PROJECT_ROOT / 'CapPhysCombine.py')],
     pathex=[str(PROJECT_ROOT)],
     binaries=[
         ('C:\\Windows\\System32\\vcruntime140.dll', '.'),
