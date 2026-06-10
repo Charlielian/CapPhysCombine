@@ -12,7 +12,15 @@ import tkinter as tk
 from tkinter import messagebox, ttk
 from tkinter.scrolledtext import ScrolledText
 
-BASE_DIR = Path(__file__).resolve().parent
+def _get_base_dir() -> Path:
+    """返回 exe 所在的根目录（兼容 PyInstaller 打包和源码运行）。"""
+    if getattr(sys, "frozen", False):
+        # PyInstaller 打包后，exe 在 dist/CapPhysCombine/CapPhysCombine.exe
+        # _internal 是同级目录，根目录是 exe 的 parent
+        return Path(sys.executable).resolve().parent
+    return Path(__file__).resolve().parent
+
+BASE_DIR = _get_base_dir()
 DATA_DIR = BASE_DIR / "data"
 
 FILE_PATTERNS = {
