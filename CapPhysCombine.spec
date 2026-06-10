@@ -66,7 +66,7 @@ exe = EXE(
     target_arch=None,
     codesign_identity=None,
     entitlements_file=None,
-    icon=None,  # TODO: add an .ico file if desired
+    icon=str(PROJECT_ROOT / 'assets' / 'icon.ico'),
 )
 
 coll = COLLECT(
