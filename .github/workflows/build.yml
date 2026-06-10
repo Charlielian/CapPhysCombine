@@ -31,6 +31,12 @@ jobs:
       - name: Build EXE with PyInstaller
         run: pyinstaller CapPhysCombine.spec
 
+      - name: Copy VC++ runtime DLLs
+        run: |
+          copy C:\Windows\System32\vcruntime140.dll dist\CapPhysCombine\
+          copy C:\Windows\System32\vcruntime140_1.dll dist\CapPhysCombine\
+          copy C:\Windows\System32\msvcp140.dll dist\CapPhysCombine\
+
       - name: Create data directory placeholder
         run: |
           mkdir dist\CapPhysCombine\data

@@ -15,7 +15,11 @@ PROJECT_ROOT = Path(SPECPATH)
 a = Analysis(
     [str(PROJECT_ROOT / '合成流量表.py')],
     pathex=[str(PROJECT_ROOT)],
-    binaries=[],
+    binaries=[
+        ('C:\\Windows\\System32\\vcruntime140.dll', '.'),
+        ('C:\\Windows\\System32\\vcruntime140_1.dll', '.'),
+        ('C:\\Windows\\System32\\msvcp140.dll', '.'),
+    ],
     datas=[],
     hiddenimports=[
         'pandas._libs',
