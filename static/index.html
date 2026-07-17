@@ -1,0 +1,311 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>CapPhysCombine 工作台</title>
+  <link rel="stylesheet" href="/static/css/app.css?v=1784300001" />
+</head>
+<body>
+  <div class="app-shell">
+    <!-- Sidebar -->
+    <aside class="sidebar">
+      <div class="sidebar-brand">CPC</div>
+      <button class="tab active" data-tab="capacity" data-tooltip="容量表合成" type="button">
+        <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="12,2 2,7 12,12 22,7"/><polyline points="2,17 12,22 22,17"/><polyline points="2,12 12,17 22,12"/></svg>
+      </button>
+      <button class="tab" data-tab="physical" data-tooltip="物理表汇总" type="button">
+        <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M3 9h18M3 15h18M9 3v18M15 3v18"/></svg>
+      </button>
+      <button class="tab" data-tab="physquery" data-tooltip="45G工参查询" type="button">
+        <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+      </button>
+      <button class="tab" data-tab="loweff" data-tooltip="低效小区" type="button">
+        <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="22 17 13.5 8.5 8.5 13.5 2 7"/><polyline points="16 17 22 17 22 11"/></svg>
+      </button>
+      <button class="tab" data-tab="zeroflow" data-tooltip="零低流量风险" type="button">
+        <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
+      </button>
+      <button class="tab" data-tab="cog" data-tooltip="共站同覆盖" type="button">
+        <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="6" y1="3" x2="6" y2="15"/><circle cx="18" cy="6" r="3"/><circle cx="6" cy="18" r="3"/><path d="M18 9a9 9 0 0 1-9 9"/></svg>
+      </button>
+    </aside>
+
+    <!-- Main content area -->
+    <div class="content-area">
+      <!-- Top bar -->
+      <header class="topbar">
+        <nav class="breadcrumb">
+          <span class="muted">CapPhysCombine</span>
+          <span class="sep">/</span>
+          <span class="current">工作台</span>
+        </nav>
+        <div class="topbar-actions">
+          <label class="btn secondary upload-btn">
+            <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
+            上传到 data/
+            <input id="uploadInput" type="file" multiple accept=".xlsx,.xls,.csv" hidden />
+          </label>
+          <button id="refreshStatusBtn" class="btn secondary" type="button">
+            <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="23 4 23 10 17 10"/><polyline points="1 20 1 14 7 14"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/></svg>
+            刷新状态
+          </button>
+        </div>
+      </header>
+
+      <!-- Body: left content + right panel -->
+      <div class="body-area">
+        <!-- Left: main content scroll area -->
+        <div class="main-scroll">
+          <!-- Tab 1: 容量表合成 -->
+          <section id="panel-capacity" class="tab-panel active card">
+            <h2 class="card-title">容量表合成</h2>
+            <p class="card-desc">扫描 data/ 下源文件，生成 5G / 4G / 45G 容量表及低效结果</p>
+            <div class="card-actions">
+              <button id="startCapacityBtn" class="btn primary" type="button">开始生成容量表</button>
+            </div>
+          </section>
+
+          <!-- Tab 2: 物理表汇总 -->
+          <section id="panel-physical" class="tab-panel card">
+            <h2 class="card-title">物理表汇总</h2>
+            <p class="card-desc">读取 4G/5G 工参与 GeoJSON，生成物理表汇总结果</p>
+            <div class="card-actions">
+              <button id="startPhysicalBtn" class="btn primary" type="button">开始汇总物理表</button>
+              <button id="checkConflictBtn" class="btn secondary" type="button">检测扇区冲突</button>
+              <button id="fixConflictBtn" class="btn secondary" type="button">修正扇区冲突</button>
+            </div>
+            <div id="conflictSection" class="conflict-section hidden">
+              <p id="conflictMeta" class="meta"></p>
+              <div class="table-wrap">
+                <table id="conflictTable">
+                  <thead></thead>
+                  <tbody></tbody>
+                </table>
+              </div>
+            </div>
+          </section>
+
+
+          <!-- Tab: 45G工参查询 -->
+          <section id="panel-physquery" class="tab-panel card">
+            <h2 class="card-title">45G工参数据查询</h2>
+            <p class="card-desc">查询统一库中的原始小区表 / 物理表汇总，支持制式、频段、厂家等筛选</p>
+            <div class="filters">
+              <select id="pqSource" class="input">
+                <option value="raw" selected>原始小区表</option>
+                <option value="agg">物理表汇总</option>
+              </select>
+              <select id="pqNet" class="input">
+                <option value="">全部制式</option>
+              </select>
+              <select id="pqBand" class="input">
+                <option value="">全部频段</option>
+              </select>
+              <select id="pqVendor" class="input">
+                <option value="">全部厂家</option>
+              </select>
+              <select id="pqSiteType" class="input">
+                <option value="">全部站点类型</option>
+              </select>
+              <select id="pqStatus" class="input">
+                <option value="">全部网元状态</option>
+              </select>
+              <select id="pqCoverType" class="input">
+                <option value="">全部覆盖类型</option>
+              </select>
+              <select id="pqGrid" class="input">
+                <option value="">全部路测网格</option>
+              </select>
+              <select id="pqRegion" class="input hidden">
+                <option value="">全部区域</option>
+              </select>
+              <select id="pqCoverLayer" class="input hidden">
+                <option value="">全部覆盖层</option>
+              </select>
+              <select id="pqCoSite" class="input hidden">
+                <option value="">全部共站制式</option>
+              </select>
+              <input id="pqKeyword" type="search" class="input" placeholder="CGI / 小区名称 / 物理站..." style="flex:1;min-width:180px" />
+              <button id="pqSearchBtn" class="btn primary" type="button">查询</button>
+              <button id="pqReloadBtn" class="btn secondary" type="button">刷新</button>
+            </div>
+            <p id="pqMeta" class="meta" style="color:var(--muted);font-size:13px;margin:8px 0 0"></p>
+            <div class="table-wrap">
+              <table id="pqTable">
+                <thead></thead>
+                <tbody></tbody>
+              </table>
+            </div>
+            <div class="btn-row" style="justify-content:space-between">
+              <button id="pqPrevBtn" class="btn secondary" type="button">上一页</button>
+              <span id="pqPageInfo" class="meta" style="color:var(--muted);font-size:13px"></span>
+              <button id="pqNextBtn" class="btn secondary" type="button">下一页</button>
+            </div>
+          </section>
+
+          <!-- Tab 3: 低效小区 -->
+          <section id="panel-loweff" class="tab-panel card">
+            <h2 class="card-title">低效小区</h2>
+            <p class="card-desc">基于容量数据生成低效小区结果，支持汇总指标与明细筛选查看</p>
+            <div class="card-actions">
+              <button id="startLoweffBtn" class="btn primary" type="button">开始生成低效小区</button>
+              <button id="loadLoweffBtn" class="btn secondary" type="button">加载结果</button>
+              <a id="loweffDownloadLink" class="btn secondary hidden" href="/api/data/download/低效小区结果.xlsx">下载 Excel</a>
+            </div>
+            <div id="loweffKpi" class="kpi-grid"></div>
+            <div class="filters">
+              <select id="loweffSheet" class="input">
+                <option value="5g" selected>5G低效明细</option>
+                <option value="4g">4G低效明细</option>
+                <option value="4g_all">全量4G小区评估</option>
+                <option value="summary">统计汇总</option>
+              </select>
+              <select id="loweffType" class="input">
+                <option value="">全部低效类型</option>
+                <option value="零效益小区">零效益小区</option>
+                <option value="低效益小区">低效益小区</option>
+              </select>
+              <select id="loweffBand" class="input">
+                <option value="">全部频段</option>
+                <option value="2.6GHz">2.6GHz</option>
+                <option value="4.9GHz">4.9GHz</option>
+              </select>
+              <input id="loweffKeyword" type="search" class="input" placeholder="CGI / 小区名称 / 物理站 / 地市..." style="flex:1;min-width:160px" />
+            </div>
+            <p id="loweffMeta" class="meta" style="color:var(--muted);font-size:13px;margin:8px 0 0"></p>
+            <div class="table-wrap">
+              <table id="loweffTable">
+                <thead></thead>
+                <tbody></tbody>
+              </table>
+            </div>
+          </section>
+
+
+          <!-- Tab: 零低流量风险 -->
+          <section id="panel-zeroflow" class="tab-panel card">
+            <h2 class="card-title">零低流量风险小区分析</h2>
+            <p class="card-desc">基于 data/ 下「重要场景-天*.xlsx」生成零流量/低流量风险监控报表，并可在线筛选查看</p>
+            <div class="card-actions">
+              <button id="startZeroFlowBtn" class="btn primary" type="button">开始零低流量分析</button>
+              <button id="loadZeroFlowBtn" class="btn secondary" type="button">加载结果</button>
+            </div>
+            <div class="filters">
+              <select id="zeroFlowSheet" class="input">
+                <option value="summary">监控汇总</option>
+                <option value="risk" selected>风险小区明细</option>
+                <option value="all">全量监控明细</option>
+              </select>
+              <select id="zeroFlowRisk" class="input">
+                <option value="">全部风险等级</option>
+                <option value="严重">严重</option>
+                <option value="高危">高危</option>
+                <option value="中危">中危</option>
+                <option value="预警">预警</option>
+                <option value="关注">关注</option>
+                <option value="正常">正常</option>
+              </select>
+              <select id="zeroFlowStatus" class="input">
+                <option value="">全部当日状态</option>
+                <option value="零流量">零流量</option>
+                <option value="低流量">低流量</option>
+                <option value="正常">正常</option>
+              </select>
+              <input id="zeroFlowKeyword" type="search" class="input" placeholder="CGI / 小区名称 / 地市..." style="flex:1;min-width:160px" />
+            </div>
+            <p id="zeroFlowMeta" class="meta" style="color:var(--muted);font-size:13px;margin:8px 0 0"></p>
+            <div class="table-wrap">
+              <table id="zeroFlowTable">
+                <thead></thead>
+                <tbody></tbody>
+              </table>
+            </div>
+          </section>
+
+          <!-- Tab 4: 共站同覆盖 -->
+          <section id="panel-cog" class="tab-panel card">
+            <h2 class="card-title">共站同覆盖表管理</h2>
+            <div class="card-actions">
+              <input id="cogSearch" type="search" class="input" placeholder="搜索 CGI / 站名 / 小区..." style="flex:1;min-width:180px" />
+              <button id="cogSearchBtn" class="btn secondary" type="button">搜索</button>
+              <button id="cogReloadBtn" class="btn secondary" type="button">刷新</button>
+              <label class="btn secondary upload-btn">
+                导入 Excel
+                <input id="cogImportInput" type="file" accept=".xlsx,.xls" hidden />
+              </label>
+              <a class="btn secondary" href="/api/cog/export/excel">导出 Excel</a>
+              <button id="cogAddBtn" class="btn primary" type="button">新增</button>
+            </div>
+            <div class="table-wrap">
+              <table id="cogTable">
+                <thead>
+                  <tr>
+                    <th>CGI</th>
+                    <th>共站同覆盖名</th>
+                    <th>物理站名</th>
+                    <th>小区名称</th>
+                    <th>频段</th>
+                    <th>操作</th>
+                  </tr>
+                </thead>
+                <tbody></tbody>
+              </table>
+            </div>
+            <p id="cogMeta" class="meta" style="color:var(--muted);font-size:13px;margin-top:12px"></p>
+          </section>
+
+          <!-- Progress + Log Panel -->
+          <section class="card progress-block">
+            <div class="progress-meta">
+              <div class="progress-bar"><div id="progressFill" class="progress-fill"></div></div>
+              <span id="progressPct" class="progress-pct">0%</span>
+              <span id="progressLabel" class="progress-label">就绪</span>
+            </div>
+            <div class="log-header">
+              <span>处理日志</span>
+              <button id="clearLogBtn" class="btn text" type="button">清空</button>
+            </div>
+            <pre id="logBox" class="log-box"></pre>
+            <div id="resultLinks" class="result-links"></div>
+          </section>
+        </div>
+
+        <!-- Right side panel: data status -->
+        <aside class="side-panel">
+          <h3>数据文件状态</h3>
+          <h4>容量表源文件</h4>
+          <ul id="capacityStatus" class="status-list"></ul>
+          <h4>物理表工参</h4>
+          <ul id="physicalStatus" class="status-list"></ul>
+          <h4>可下载结果</h4>
+          <ul id="outputList" class="status-list"></ul>
+        </aside>
+      </div>
+    </div>
+  </div>
+
+  <dialog id="cogDialog">
+    <form method="dialog" id="cogForm" class="cog-form">
+      <h3 id="cogDialogTitle">编辑记录</h3>
+      <label>CGI <input name="CGI" required /></label>
+      <label>共站同覆盖名 <input name="共站同覆盖名" /></label>
+      <label>物理站名 <input name="物理站名" /></label>
+      <label>小区名称 <input name="小区名称" /></label>
+      <label>使用频段 <input name="使用频段" /></label>
+      <label>是否覆盖层 <input name="是否覆盖层" /></label>
+      <label>小区所属区域 <input name="小区所属区域" /></label>
+      <label>路测网格 <input name="路测网格" /></label>
+      <label>经度 <input name="经度" type="number" step="any" /></label>
+      <label>纬度 <input name="纬度" type="number" step="any" /></label>
+      <label>sectionid <input name="sectionid" type="number" /></label>
+      <div class="btn-row">
+        <button value="cancel" class="btn secondary" type="submit">取消</button>
+        <button id="cogSaveBtn" value="save" class="btn primary" type="submit">保存</button>
+      </div>
+    </form>
+  </dialog>
+
+  <script src="/static/js/app.js?v=1784300001"></script>
+</body>
+</html>

@@ -1,47 +1,33 @@
 # -*- mode: python ; coding: utf-8 -*-
-"""
-PyInstaller spec file for 容量表合成工具
-Build command: pyinstaller CapPhysCombine.spec
-"""
-
-import sys
-from pathlib import Path
 
 block_cipher = None
 
-# Project root directory
-PROJECT_ROOT = Path(SPECPATH)
-
 a = Analysis(
-    [str(PROJECT_ROOT / 'CapPhysCombine.py')],
-    pathex=[str(PROJECT_ROOT)],
-    binaries=[
-        ('C:\\Windows\\System32\\vcruntime140.dll', '.'),
-        ('C:\\Windows\\System32\\vcruntime140_1.dll', '.'),
-        ('C:\\Windows\\System32\\msvcp140.dll', '.'),
+    ['CapPhysCombine.py'],
+    pathex=[],
+    binaries=[],
+    datas=[
+        ('app', 'app'),
+        ('static', 'static'),
+        ('区域', '区域'),
+        ('网格', '网格'),
+        ('路测网格', '路测网格'),
     ],
-    datas=[],
     hiddenimports=[
-        'pandas._libs',
-        'pandas._libs.tslibs',
-        'pandas._libs.tslibs.timedeltas',
-        'pandas._libs.tslibs.nattype',
-        'pandas._libs.tslibs.np_datetime',
+        'duckdb',
+        'geopandas',
+        'shapely',
+        'fastapi',
+        'uvicorn',
+        'python_multipart',
         'openpyxl',
+        'pandas',
+        'numpy',
     ],
     hookspath=[],
     hooksconfig={},
     runtime_hooks=[],
-    excludes=[
-        'matplotlib',
-        'numpy.distutils',
-        'scipy',
-        'PIL',
-        'IPython',
-        'jupyter',
-        'notebook',
-        'pytest',
-    ],
+    excludes=[],
     win_no_prefer_redirects=False,
     win_private_assemblies=False,
     cipher=block_cipher,
@@ -60,13 +46,12 @@ exe = EXE(
     bootloader_ignore_signals=False,
     strip=False,
     upx=True,
-    console=False,  # GUI app, no console window
+    console=True,
     disable_windowed_traceback=False,
     argv_emulation=False,
     target_arch=None,
     codesign_identity=None,
     entitlements_file=None,
-    icon=str(PROJECT_ROOT / 'assets' / 'icon.ico'),
 )
 
 coll = COLLECT(

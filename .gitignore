@@ -9,6 +9,7 @@ __pycache__/
 合成_容量表_*.xlsx
 容量表_45G*.xlsx
 .~*.xlsx
+*.xlsx
 
 # Data and logs (user-specific)
 data/
@@ -21,3 +22,19 @@ logs/
 dist/
 build/
 *.spec.bak
+
+# Databases
+*.db
+*.duckdb
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# Design files
+capphys-dashboard.design/
+
+# Temporary files
+rebuild_three_periods.py
