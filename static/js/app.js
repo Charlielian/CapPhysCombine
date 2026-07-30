@@ -963,12 +963,40 @@
     tbody.innerHTML = "";
     data.records.forEach((row) => {
       const tr = document.createElement("tr");
+      const isActive = row.is_active !== false && row.is_active !== 0;
+      if (!isActive) tr.classList.add("row-inactive");
       ["CGI", "共站同覆盖名", "物理站名", "小区名称", "使用频段"].forEach((k) => {
         const td = document.createElement("td");
         td.textContent = row[k] == null ? "" : String(row[k]);
+        if (!isActive) td.classList.add("text-muted");
         tr.appendChild(td);
       });
+      // 状态列
+      const statusTd = document.createElement("td");
+      const badge = document.createElement("span");
+      badge.className = isActive ? "badge badge-active" : "badge badge-inactive";
+      badge.textContent = isActive ? "激活" : "已停用";
+      statusTd.appendChild(badge);
+      tr.appendChild(statusTd);
+      // 操作列
       const actions = document.createElement("td");
+      actions.className = "actions-cell";
+      const toggleBtn = document.createElement("button");
+      toggleBtn.className = isActive ? "btn btn-toggle-off" : "btn btn-toggle-on";
+      toggleBtn.type = "button";
+      toggleBtn.textContent = isActive ? "去激活" : "激活";
+      toggleBtn.onclick = async () => {
+        try {
+          await api(`/api/cog/active`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ cgi: row.CGI, active: !isActive }),
+          });
+          await loadCog($("cogSearch").value.trim());
+        } catch (err) {
+          alert(err.message);
+        }
+      };
       const editBtn = document.createElement("button");
       editBtn.className = "btn text";
       editBtn.type = "button";
@@ -984,6 +1012,7 @@
         await api(`/api/cog/${encodeURIComponent(row.CGI)}`, { method: "DELETE" });
         await loadCog($("cogSearch").value.trim());
       };
+      actions.appendChild(toggleBtn);
       actions.appendChild(editBtn);
       actions.appendChild(delBtn);
       tr.appendChild(actions);

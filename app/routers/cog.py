@@ -129,6 +129,25 @@ def create_cog(record: CogRecord):
     return {"ok": True}
 
 
+@router.post("/active")
+def toggle_cog_active(body: dict):
+    """切换记录的激活/去激活状态。body = {"cgi": "xxx", "active": true|false}"""
+    cgi = body.get("cgi")
+    active = body.get("active")
+    if not cgi:
+        raise HTTPException(status_code=400, detail="缺少 cgi 参数")
+    if active is None:
+        raise HTTPException(status_code=400, detail="缺少 active 参数")
+    with CogCoverageManager() as mgr:
+        existing = mgr.get_by_cgi(cgi)
+        if existing.empty:
+            raise HTTPException(status_code=404, detail="记录不存在")
+        ok = mgr.set_active(cgi, bool(active))
+        if not ok:
+            raise HTTPException(status_code=400, detail="操作失败")
+    return {"ok": True, "active": bool(active)}
+
+
 @router.get("/{cgi}")
 def get_cog(cgi: str):
     with CogCoverageManager() as mgr:

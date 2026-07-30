@@ -78,7 +78,11 @@ def init_unified_database(conn: duckdb.DuckDBPyConnection | None = None) -> duck
     elif "是否覆盖层" not in cols:
         conn.execute('ALTER TABLE 共站同覆盖小区表 ADD COLUMN "是否覆盖层" TEXT')
 
-    # 创建索引
+    # is_active 列：TRUE=激活（可用），FALSE=去激活（已拆站/拆小区，不参与物理表关联）
+    if "is_active" not in cols:
+        conn.execute('ALTER TABLE 共站同覆盖小区表 ADD COLUMN "is_active" BOOLEAN DEFAULT TRUE')
+        conn.execute("UPDATE 共站同覆盖小区表 SET is_active = TRUE WHERE is_active IS NULL")
+
     conn.execute("CREATE INDEX IF NOT EXISTS idx_cc_cgi ON 共站同覆盖小区表(CGI)")
     conn.execute("CREATE INDEX IF NOT EXISTS idx_cc_name ON 共站同覆盖小区表(共站同覆盖名)")
     conn.execute("CREATE INDEX IF NOT EXISTS idx_cc_station ON 共站同覆盖小区表(物理站名)")
@@ -288,14 +292,29 @@ class CogCoverageManager:
         df.to_excel(excel_path, index=False)
         return len(df)
 
+    def set_active(self, cgi: str, active: bool) -> bool:
+        """设置记录的激活状态（1=激活, 0=去激活）"""
+        try:
+            val = 1 if active else 0
+            self.conn.execute(
+                "UPDATE 共站同覆盖小区表 SET is_active = ?, 更新时间 = CURRENT_TIMESTAMP WHERE CGI = ?",
+                [val, cgi],
+            )
+            return True
+        except Exception as e:
+            print(f"设置激活状态失败: {e}")
+            return False
+
     def get_count(self) -> int:
         """获取记录总数"""
         result = self.conn.execute("SELECT COUNT(*) FROM 共站同覆盖小区表").fetchone()
         return result[0] if result else 0
 
     def get_mapping_dict(self) -> dict[str, dict]:
-        """获取CGI到记录的映射字典（供其他模块使用）"""
-        df = self.get_all()
+        """获取CGI到记录的映射字典（供其他模块使用，仅返回激活记录）"""
+        df = self.conn.execute(
+            "SELECT * FROM 共站同覆盖小区表 WHERE is_active = TRUE ORDER BY CGI"
+        ).fetchdf()
         result = {}
         for _, row in df.iterrows():
             cgi = str(row.get("CGI", ""))

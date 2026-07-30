@@ -578,6 +578,11 @@ def init_unified_database(conn: duckdb.DuckDBPyConnection | None = None) -> duck
     elif "是否覆盖层" not in cols:
         conn.execute('ALTER TABLE 共站同覆盖小区表 ADD COLUMN "是否覆盖层" TEXT')
 
+    # 兼容旧表：添加 is_active 列（默认激活）
+    if "is_active" not in cols:
+        conn.execute('ALTER TABLE 共站同覆盖小区表 ADD COLUMN "is_active" BOOLEAN DEFAULT TRUE')
+        conn.execute("UPDATE 共站同覆盖小区表 SET is_active = TRUE WHERE is_active IS NULL")
+
     # 创建索引
     conn.execute("CREATE INDEX IF NOT EXISTS idx_cc_cgi ON 共站同覆盖小区表(CGI)")
     conn.execute("CREATE INDEX IF NOT EXISTS idx_cc_name ON 共站同覆盖小区表(共站同覆盖名)")
@@ -794,8 +799,10 @@ class CogCoverageManager:
         return result[0] if result else 0
     
     def get_mapping_dict(self) -> dict[str, dict]:
-        """获取CGI到记录的映射字典（供其他模块使用）"""
-        df = self.get_all()
+        """获取CGI到记录的映射字典（供其他模块使用，仅返回激活记录）"""
+        df = self.conn.execute(
+            "SELECT * FROM 共站同覆盖小区表 WHERE is_active = TRUE ORDER BY CGI"
+        ).fetchdf()
         result = {}
         for _, row in df.iterrows():
             cgi = str(row.get("CGI", ""))
