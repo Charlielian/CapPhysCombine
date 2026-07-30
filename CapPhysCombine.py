@@ -172,9 +172,9 @@ def main(argv: list[str] | None = None) -> int:
         }
         return legacy[args.mode](args)
 
+    # 无子命令时默认启动 Web 服务（双击 exe 场景）
     if not getattr(args, "func", None):
-        parser.print_help()
-        return 0
+        return cmd_serve(args)
     return args.func(args)
 
 
