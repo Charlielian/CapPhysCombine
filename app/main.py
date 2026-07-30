@@ -13,7 +13,7 @@ from fastapi.exceptions import RequestValidationError
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 
-from app.config import DEFAULT_HOST, DEFAULT_PORT, STATIC_DIR
+from app.config import STATIC_DIR, get_server_host, get_server_port
 from app.pipelines.core import init_unified_database, setup_logging
 from app.routers import cog, data, jobs_api, physical_extra, physical_query
 from app.schemas import AppError, ErrorResponse, ErrorDetail
@@ -89,7 +89,7 @@ app.include_router(physical_query.router)
 
 @app.get("/api/health")
 def health():
-    return {"status": "ok", "port": DEFAULT_PORT}
+    return {"status": "ok", "port": get_server_port()}
 
 
 # Static assets under /static; index.html at /
@@ -106,8 +106,8 @@ def main() -> None:
 
     uvicorn.run(
         "app.main:app",
-        host=DEFAULT_HOST,
-        port=DEFAULT_PORT,
+        host=get_server_host(),
+        port=get_server_port(),
         reload=False,
     )
 
