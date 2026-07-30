@@ -1,25 +1,32 @@
-from app.pipelines.core import (
+"""Pipeline package: domain modules for CapPhysCombine."""
+
+from app.pipelines.capacity import (
+    FILE_PATTERNS,
+    build_4g_table,
+    build_5g_table,
+    build_45g_table,
+    run_pipeline,
+)
+from app.pipelines.common import (
     BASE_DIR,
     DATA_DIR,
-    FILE_PATTERNS,
     LOWEFF_OUTPUT_PATH,
     PHYSICAL_FILE_PATTERNS,
-    PHYSICAL_TABLE_AVAILABLE,
-    UNIFIED_DB_PATH,
-    CogCoverageManager,
-    SourceFileError,
-    detect_sector_conflicts,
     get_data_file_status,
-    init_unified_database,
     list_output_files,
-    run_low_efficiency_pipeline,
-    run_physical_table_pipeline,
-    run_physical_table_sector_fix,
-    run_pipeline,
     setup_logging,
 )
+from app.pipelines.loweff import build_low_efficiency_table, run_low_efficiency_pipeline
+from app.pipelines.nrm_sync import run_nrm_sync_pipeline
+from app.pipelines.core import run_physical_table_pipeline
+from app.pipelines.sector import (
+    detect_sector_conflicts,
+    run_physical_table_sector_fix,
+    suggest_sector_fixes,
+)
 from app.pipelines.zero_low_flow import (
-    OUTPUT_PREFIX as ZERO_LOW_FLOW_OUTPUT_PREFIX,
+    run_4g_zero_low_flow_pipeline,
+    run_5g_zero_low_flow_pipeline,
     run_zero_low_flow_pipeline,
 )
 
@@ -29,19 +36,21 @@ __all__ = [
     "FILE_PATTERNS",
     "LOWEFF_OUTPUT_PATH",
     "PHYSICAL_FILE_PATTERNS",
-    "PHYSICAL_TABLE_AVAILABLE",
-    "UNIFIED_DB_PATH",
-    "CogCoverageManager",
-    "SourceFileError",
+    "build_45g_table",
+    "build_4g_table",
+    "build_5g_table",
+    "build_low_efficiency_table",
     "detect_sector_conflicts",
     "get_data_file_status",
-    "init_unified_database",
     "list_output_files",
+    "run_4g_zero_low_flow_pipeline",
+    "run_5g_zero_low_flow_pipeline",
     "run_low_efficiency_pipeline",
     "run_physical_table_pipeline",
+    "run_nrm_sync_pipeline",
     "run_physical_table_sector_fix",
     "run_pipeline",
-    "setup_logging",
-    "ZERO_LOW_FLOW_OUTPUT_PREFIX",
     "run_zero_low_flow_pipeline",
+    "setup_logging",
+    "suggest_sector_fixes",
 ]

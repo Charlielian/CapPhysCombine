@@ -1,10 +1,22 @@
-/* ===== CapPhysCombine Dashboard — Dark Theme ===== */
+/* ===== CapPhysCombine Dashboard — 主题系统 ===== */
+/* 结构变量（与主题无关） */
 :root {
+  --radius: 10px;
+  --radius-sm: 6px;
+  --radius-lg: 16px;
+  --mono: "JetBrains Mono", "SF Mono", "Menlo", "Consolas", monospace;
+  --sans: "Inter", "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", system-ui, sans-serif;
+}
+
+/* 深色主题（默认，保持向后兼容） */
+:root,
+:root[data-theme="dark"] {
   --bg: #0f1117;
   --surface-1: #181b24;
   --surface-2: #1e2230;
   --surface-3: #262a38;
   --panel: var(--surface-1);
+  --border: #2a2e3a;
   --text: #e8ecf1;
   --muted: #9ca3af;
   --muted-2: #6b7280;
@@ -16,11 +28,39 @@
   --warn: #f59e0b;
   --bad: #ef4444;
   --info: #06b6d4;
-  --radius: 10px;
-  --radius-sm: 6px;
-  --radius-lg: 16px;
-  --mono: "JetBrains Mono", "SF Mono", "Menlo", "Consolas", monospace;
-  --sans: "Inter", "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", system-ui, sans-serif;
+  --log-bg: #0a0c10;
+  --log-text: #9ca3af;
+  --backdrop: rgba(0, 0, 0, 0.6);
+  --loweff-zero: #ff8f7a;
+  --loweff-low: #f0c674;
+  --shadow-pop: 0 8px 24px rgba(0, 0, 0, 0.35);
+}
+
+/* 浅色主题 */
+:root[data-theme="light"] {
+  --bg: #f6f7f9;
+  --surface-1: #ffffff;
+  --surface-2: #eef0f3;
+  --surface-3: #dde1e6;
+  --panel: var(--surface-1);
+  --border: #e5e7eb;
+  --text: #1f2329;
+  --muted: #6b7280;
+  --muted-2: #9ca3af;
+  --line: #e5e7eb;
+  --primary: #2563eb;
+  --primary-hover: #1d4ed8;
+  --primary-soft: rgba(37, 99, 235, 0.10);
+  --ok: #059669;
+  --warn: #d97706;
+  --bad: #dc2626;
+  --info: #0891b2;
+  --log-bg: #f8f9fa;
+  --log-text: #4b5563;
+  --backdrop: rgba(15, 17, 23, 0.45);
+  --loweff-zero: #c0392b;
+  --loweff-low: #b8860b;
+  --shadow-pop: 0 8px 24px rgba(15, 23, 42, 0.12);
 }
 
 * { box-sizing: border-box; }
@@ -482,12 +522,12 @@ td.actions-cell {
   max-height: 520px;
 }
 
-.conflict-section thead tr:first-child th {
+.table-wrap thead tr:first-child th {
   top: 0;
   z-index: 3;
 }
 
-.conflict-section thead tr.filter-row th {
+.table-wrap thead tr.filter-row th {
   top: 41px;
   padding: 6px 8px;
   background: var(--surface-1);
@@ -495,7 +535,7 @@ td.actions-cell {
   z-index: 2;
 }
 
-.conflict-section .th-filter {
+.th-filter {
   width: 100%;
   min-width: 88px;
   box-sizing: border-box;
@@ -509,11 +549,11 @@ td.actions-cell {
   outline: none;
 }
 
-.conflict-section .th-filter::placeholder {
+.th-filter::placeholder {
   color: var(--muted-2);
 }
 
-.conflict-section .th-filter-select {
+.th-filter-select {
   appearance: none;
   background-image: linear-gradient(45deg, transparent 50%, var(--muted) 50%),
     linear-gradient(135deg, var(--muted) 50%, transparent 50%);
@@ -524,7 +564,7 @@ td.actions-cell {
   cursor: pointer;
 }
 
-.conflict-section .th-filter:focus {
+.th-filter:focus {
   border-color: var(--primary);
 }
 
@@ -585,8 +625,8 @@ td.actions-cell {
   min-height: 120px;
   max-height: 280px;
   overflow: auto;
-  background: #0a0c10;
-  color: #9ca3af;
+  background: var(--log-bg);
+  color: var(--log-text);
   border: 1px solid var(--line);
   border-radius: var(--radius);
   padding: 16px;
@@ -621,7 +661,7 @@ dialog {
 }
 
 dialog::backdrop {
-  background: rgba(0, 0, 0, 0.6);
+  background: var(--backdrop);
 }
 
 .cog-form {
@@ -699,7 +739,7 @@ dialog::backdrop {
 }
 .kpi-card {
   background: color-mix(in srgb, var(--panel, #1a1f2b) 88%, #2b3448);
-  border: 1px solid color-mix(in srgb, var(--border, #2f3a4f) 80%, transparent);
+  border: 1px solid color-mix(in srgb, var(--border) 80%, transparent);
   border-radius: 10px;
   padding: 12px 14px;
 }
@@ -714,10 +754,81 @@ dialog::backdrop {
   letter-spacing: 0.01em;
 }
 td[data-loweff-type="零效益小区"] {
-  color: #ff8f7a;
+  color: var(--loweff-zero);
   font-weight: 600;
 }
 td[data-loweff-type="低效益小区"] {
-  color: #f0c674;
+  color: var(--loweff-low);
   font-weight: 600;
 }
+
+/* ===== 主题切换器 ===== */
+.theme-switcher {
+  position: relative;
+  display: inline-flex;
+}
+
+.theme-switcher > .btn {
+  padding: 8px 10px;
+  line-height: 0;
+}
+
+.theme-switcher > .btn svg {
+  width: 18px;
+  height: 18px;
+}
+
+.theme-menu {
+  position: absolute;
+  top: calc(100% + 6px);
+  right: 0;
+  min-width: 168px;
+  list-style: none;
+  margin: 0;
+  padding: 6px;
+  background: var(--surface-1);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  box-shadow: var(--shadow-pop);
+  z-index: 200;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.theme-menu[hidden] { display: none; }
+
+.theme-menu li {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 10px;
+  border-radius: var(--radius-sm);
+  font-size: 14px;
+  color: var(--text);
+  cursor: pointer;
+  user-select: none;
+  white-space: nowrap;
+}
+
+.theme-menu li:hover { background: var(--surface-2); }
+
+.theme-menu li .tm-icon {
+  width: 16px;
+  height: 16px;
+  stroke-width: 1.8;
+  flex-shrink: 0;
+}
+
+.theme-menu li .tm-check {
+  margin-left: auto;
+  width: 14px;
+  height: 14px;
+  stroke-width: 2.5;
+  opacity: 0;
+  color: var(--primary);
+  flex-shrink: 0;
+}
+
+.theme-menu li.active { color: var(--primary); }
+.theme-menu li.active .tm-check { opacity: 1; }

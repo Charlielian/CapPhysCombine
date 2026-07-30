@@ -1,16 +1,22 @@
-"""FastAPI application entrypoint."""
+"""FastAPI application entrypoint.
+
+Registers structured error handlers and mounts all routers with
+dependency-injected singletons (``JobManager`` via ``Depends()``).
+"""
 
 from __future__ import annotations
 
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI
-from fastapi.responses import FileResponse
+from fastapi import FastAPI, Request
+from fastapi.exceptions import RequestValidationError
+from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 
 from app.config import DEFAULT_HOST, DEFAULT_PORT, STATIC_DIR
 from app.pipelines.core import init_unified_database, setup_logging
 from app.routers import cog, data, jobs_api, physical_extra, physical_query
+from app.schemas import AppError, ErrorResponse, ErrorDetail
 
 
 @asynccontextmanager
@@ -30,6 +36,49 @@ app = FastAPI(
     version="3.0.0",
     lifespan=lifespan,
 )
+
+
+# ---------------------------------------------------------------------------
+# Global exception handlers — consistent { "ok": false, "error": { … } } shape
+# ---------------------------------------------------------------------------
+
+
+@app.exception_handler(AppError)
+async def app_error_handler(_request: Request, exc: AppError) -> JSONResponse:
+    body = ErrorResponse(error=ErrorDetail(
+        code=exc.code,
+        message=exc.detail or str(exc),
+    )).model_dump()
+    return JSONResponse(status_code=exc.status_code, content=body)
+
+
+@app.exception_handler(RequestValidationError)
+async def validation_error_handler(_request: Request, exc: RequestValidationError) -> JSONResponse:
+    detail = "; ".join(
+        f"{'.'.join(str(loc) for loc in e.get('loc', []))}: {e.get('msg', '')}"
+        for e in exc.errors()
+    )
+    body = ErrorResponse(error=ErrorDetail(
+        code="validation_error",
+        message="请求参数校验失败",
+        detail=detail,
+    )).model_dump()
+    return JSONResponse(status_code=422, content=body)
+
+
+@app.exception_handler(Exception)
+async def unhandled_error_handler(_request: Request, exc: Exception) -> JSONResponse:
+    body = ErrorResponse(error=ErrorDetail(
+        code="internal_error",
+        message="服务器内部错误",
+        detail=str(exc),
+    )).model_dump()
+    return JSONResponse(status_code=500, content=body)
+
+
+# ---------------------------------------------------------------------------
+# Routers
+# ---------------------------------------------------------------------------
 
 app.include_router(data.router)
 app.include_router(jobs_api.router)

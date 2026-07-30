@@ -1,0 +1,48 @@
+name: Tests
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+    branches:
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.10", "3.11", "3.12"]
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v5
+
+      - name: Set up Python ${{ matrix.python-version }}
+        uses: actions/setup-python@v6
+        with:
+          python-version: ${{ matrix.python-version }}
+          architecture: 'x64'
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install pytest pandera loguru ruff mypy httpx
+
+      - name: Run smoke + regression tests
+        run: python -m pytest tests/ -q --tb=short
+
+      - name: Ruff lint (warn only)
+        run: ruff check app/ tests/ || true
+        continue-on-error: true
+
+      - name: Mypy type check (warn only)
+        run: mypy app/ --ignore-missing-imports || true
+        continue-on-error: true

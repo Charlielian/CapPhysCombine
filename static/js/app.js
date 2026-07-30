@@ -10,12 +10,24 @@
       total: 0,
       metaLoaded: false,
     },
+    capResults: {
+      offset: 0,
+      limit: 200,
+      total: 0,
+    },
     conflict: {
       columns: [],
       records: [],
       filters: {},
       conflictCount: 0,
       fixCount: null,
+    },
+    zeroFlow: {
+      columns: [],
+      records: [],
+      filters: {},
+      total: 0,
+      file: "",
     },
   };
 
@@ -53,7 +65,7 @@
   }
 
   function setBusy(busy) {
-    ["startCapacityBtn", "startPhysicalBtn", "startLoweffBtn", "startZeroFlowBtn", "checkConflictBtn", "fixConflictBtn"]
+    ["startCapacityBtn", "startPhysicalBtn", "startNrmSyncBtn", "startLoweffBtn", "startZeroFlowBtn", "startZeroFlow5gBtn", "checkConflictBtn", "fixConflictBtn"]
       .forEach((id) => {
         const el = $(id);
         if (el) el.disabled = busy;
@@ -277,6 +289,12 @@
   }
 
   async function refreshStatus() {
+    // 若 HTMX 可用，触发其局部刷新（由 #statusPanel 的 hx-trigger 监听 statusChanged）
+    if (window.htmx && document.getElementById("statusPanel")) {
+      document.body.dispatchEvent(new CustomEvent("statusChanged"));
+      return;
+    }
+    // 离线/HTMX 未加载时的回退：JSON + 手动重建 DOM
     const status = await api("/api/data/status");
     renderStatusList($("capacityStatus"), status.capacity);
     renderStatusList($("physicalStatus"), status.physical);
@@ -346,12 +364,72 @@
             appendLog([`自动加载零低流量结果失败: ${err.message}`]);
           }
         }
+        // After capacity job, refresh the persisted results summary
+        if (finishedType === "capacity") {
+          try {
+            await loadCapresSummary();
+          } catch (err) {
+            appendLog([`刷新合成结果摘要失败: ${err.message}`]);
+          }
+        }
       }
     } catch (err) {
       setBusy(false);
       clearInterval(state.pollTimer);
       state.pollTimer = null;
       appendLog([`轮询失败: ${err.message}`]);
+    }
+  }
+
+  async function startZeroFlowWithFiles(fileList) {
+    if (!fileList || !fileList.length) return;
+    const formData = new FormData();
+    for (const f of fileList) formData.append("files", f);
+    try {
+      setBusy(true);
+      $("logBox").textContent = "";
+      setProgress(0, `导入 ${fileList.length} 个文件并启动分析...`);
+      renderResultLinks([]);
+      const job = await api("/api/jobs/zero-low-flow/run", {
+        method: "POST",
+        body: formData,
+      });
+      state.jobId = job.id;
+      if (state.pollTimer) clearInterval(state.pollTimer);
+      state.pollTimer = setInterval(pollJob, 1000);
+      await pollJob();
+    } catch (err) {
+      setBusy(false);
+      appendLog([`启动失败: ${err.message}`]);
+      setProgress(0, "启动失败");
+    } finally {
+      $("zeroFlowFileInput").value = "";
+    }
+  }
+
+  async function startZeroFlow5gWithFiles(fileList) {
+    if (!fileList || !fileList.length) return;
+    const formData = new FormData();
+    for (const f of fileList) formData.append("files", f);
+    try {
+      setBusy(true);
+      $("logBox").textContent = "";
+      setProgress(0, `导入 ${fileList.length} 个5G文件并启动分析...`);
+      renderResultLinks([]);
+      const job = await api("/api/jobs/zero-low-flow-5g/run", {
+        method: "POST",
+        body: formData,
+      });
+      state.jobId = job.id;
+      if (state.pollTimer) clearInterval(state.pollTimer);
+      state.pollTimer = setInterval(pollJob, 1000);
+      await pollJob();
+    } catch (err) {
+      setBusy(false);
+      appendLog([`启动失败: ${err.message}`]);
+      setProgress(0, "启动失败");
+    } finally {
+      $("zeroFlow5gFileInput").value = "";
     }
   }
 
@@ -376,6 +454,105 @@
     }
   }
 
+  function renderCapresKpi(summary) {
+    const box = $("capresKpi");
+    if (!box) return;
+    box.innerHTML = "";
+    if (!summary || !summary.tables) return;
+    summary.tables.forEach((t) => {
+      const card = document.createElement("div");
+      card.className = "kpi-card";
+      const label = document.createElement("div");
+      label.className = "kpi-label";
+      label.textContent = t.label;
+      const value = document.createElement("div");
+      value.className = "kpi-value";
+      value.textContent = t.row_count > 0 ? `${t.row_count} 条` : "暂无数据";
+      card.appendChild(label);
+      card.appendChild(value);
+      box.appendChild(card);
+    });
+  }
+
+  async function loadCapresSummary() {
+    try {
+      const data = await api("/api/capacity-results/summary");
+      renderCapresKpi(data);
+    } catch (err) {
+      appendLog([`加载容量表摘要失败: ${err.message}`]);
+    }
+  }
+
+  async function loadCapresults(options = {}) {
+    const resetOffset = options.resetOffset !== false;
+    if (resetOffset) state.capResults.offset = 0;
+
+    const table = $("capresTable").value;
+    const keyword = $("capresKeyword").value.trim();
+    const qs = new URLSearchParams({
+      table,
+      keyword,
+      limit: String(state.capResults.limit),
+      offset: String(state.capResults.offset),
+    });
+    const data = await api(`/api/capacity-results/view?${qs}`);
+    state.capResults.total = data.total || 0;
+
+    const thead = $("capresTable_el").querySelector("thead");
+    const tbody = $("capresTable_el").querySelector("tbody");
+    thead.innerHTML = "";
+    tbody.innerHTML = "";
+
+    const trh = document.createElement("tr");
+    (data.columns || []).forEach((c) => {
+      const th = document.createElement("th");
+      th.textContent = c;
+      trh.appendChild(th);
+    });
+    thead.appendChild(trh);
+
+    if (!data.records.length) {
+      const tr = document.createElement("tr");
+      tr.className = "empty-row";
+      const td = document.createElement("td");
+      td.colSpan = Math.max((data.columns || []).length, 1);
+      td.textContent = "暂无合成结果，请先运行容量表合成";
+      tr.appendChild(td);
+      tbody.appendChild(tr);
+    } else {
+      data.records.forEach((row) => {
+        const tr = document.createElement("tr");
+        data.columns.forEach((c) => {
+          const td = document.createElement("td");
+          const v = row[c];
+          td.textContent = v == null ? "" : String(v);
+          if (c === "CGI" || c === "NCGI") td.className = "mono";
+          tr.appendChild(td);
+        });
+        tbody.appendChild(tr);
+      });
+    }
+
+    const shown = data.records.length;
+    const from = data.total ? state.capResults.offset + 1 : 0;
+    const to = state.capResults.offset + shown;
+    const meta = $("capresMeta");
+    if (meta) {
+      meta.textContent = `${data.label} · 共 ${data.total} 条，当前显示 ${from}-${to}`;
+    }
+    const pageInfo = $("capresPageInfo");
+    if (pageInfo) {
+      const page = Math.floor(state.capResults.offset / state.capResults.limit) + 1;
+      const pages = Math.max(1, Math.ceil(state.capResults.total / state.capResults.limit));
+      pageInfo.textContent = `第 ${page} / ${pages} 页`;
+    }
+    if ($("capresPrevBtn")) $("capresPrevBtn").disabled = state.capResults.offset <= 0;
+    if ($("capresNextBtn")) {
+      $("capresNextBtn").disabled =
+        state.capResults.offset + state.capResults.limit >= state.capResults.total;
+    }
+  }
+
   function switchTab(name) {
     document.querySelectorAll(".tab").forEach((t) => {
       t.classList.toggle("active", t.dataset.tab === name);
@@ -383,6 +560,10 @@
     document.querySelectorAll(".tab-panel").forEach((p) => {
       p.classList.toggle("active", p.id === `panel-${name}`);
     });
+    if (name === "capresults") {
+      loadCapresSummary().catch(() => {});
+      loadCapresults({ resetOffset: false }).catch(() => {});
+    }
     if (name === "cog") loadCog();
     if (name === "loweff") loadLoweff().catch(() => {});
     if (name === "zeroflow") loadZeroFlow().catch(() => {});
@@ -528,6 +709,121 @@
     }
   }
 
+  function getZeroFlowFilteredRecords() {
+    const { records, filters } = state.zeroFlow;
+    const active = Object.entries(filters || {}).filter(([, v]) => v && String(v).trim());
+    if (!active.length) return records || [];
+    return (records || []).filter((row) =>
+      active.every(([col, raw]) => {
+        const needle = String(raw).trim().toLowerCase();
+        const value = row[col];
+        const hay = value == null ? "" : String(value);
+        return hay.toLowerCase().includes(needle);
+      })
+    );
+  }
+
+  function renderZeroFlowBody() {
+    const table = $("zeroFlowTable");
+    if (!table) return;
+    const tbody = table.querySelector("tbody");
+    tbody.innerHTML = "";
+    const columns = state.zeroFlow.columns || [];
+    const filtered = getZeroFlowFilteredRecords();
+
+    if (!columns.length) return;
+
+    if (!filtered.length) {
+      const tr = document.createElement("tr");
+      tr.className = "empty-row";
+      const td = document.createElement("td");
+      td.colSpan = Math.max(columns.length, 1);
+      td.textContent = (state.zeroFlow.records || []).length
+        ? "无匹配记录，请调整表头筛选"
+        : "暂无数据";
+      tr.appendChild(td);
+      tbody.appendChild(tr);
+      return;
+    }
+
+    filtered.forEach((row) => {
+      const tr = document.createElement("tr");
+      columns.forEach((c) => {
+        const td = document.createElement("td");
+        const v = row[c];
+        td.textContent = v == null ? "" : String(v);
+        if (c === "风险等级" && v) {
+          td.dataset.risk = String(v);
+        }
+        tr.appendChild(td);
+      });
+      tbody.appendChild(tr);
+    });
+  }
+
+  function renderZeroFlowTable(data) {
+    const table = $("zeroFlowTable");
+    if (!table) return;
+    const thead = table.querySelector("thead");
+
+    state.zeroFlow.columns = data.columns || [];
+    state.zeroFlow.records = data.records || [];
+    state.zeroFlow.filters = {};
+    state.zeroFlow.total = data.total || 0;
+    state.zeroFlow.file = data.file || "";
+
+    thead.innerHTML = "";
+    const columns = state.zeroFlow.columns;
+
+    const trLabel = document.createElement("tr");
+    columns.forEach((c) => {
+      const th = document.createElement("th");
+      th.textContent = c;
+      trLabel.appendChild(th);
+    });
+    thead.appendChild(trLabel);
+
+    const trFilter = document.createElement("tr");
+    trFilter.className = "filter-row";
+    columns.forEach((c) => {
+      const th = document.createElement("th");
+      const input = document.createElement("input");
+      input.type = "search";
+      input.className = "th-filter";
+      input.placeholder = "筛选";
+      input.setAttribute("aria-label", `筛选 ${c}`);
+      input.dataset.column = c;
+      input.addEventListener("input", () => {
+        const val = input.value;
+        if (val && val.trim()) {
+          state.zeroFlow.filters[c] = val;
+        } else {
+          delete state.zeroFlow.filters[c];
+        }
+        renderZeroFlowBody();
+        updateZeroFlowMeta();
+      });
+      th.appendChild(input);
+      trFilter.appendChild(th);
+    });
+    thead.appendChild(trFilter);
+
+    renderZeroFlowBody();
+    updateZeroFlowMeta();
+  }
+
+  function updateZeroFlowMeta() {
+    const meta = $("zeroFlowMeta");
+    if (!meta) return;
+    const total = state.zeroFlow.total || 0;
+    const filtered = getZeroFlowFilteredRecords().length;
+    const loaded = (state.zeroFlow.records || []).length;
+    const file = state.zeroFlow.file || "";
+    let text = `文件 ${file} · 共 ${total} 条，已加载 ${loaded} 条`;
+    if (filtered !== loaded) text += `，筛选后 ${filtered} 条`;
+    meta.textContent = text;
+  }
+
   async function loadZeroFlow() {
     const sheet = $("zeroFlowSheet").value;
     const keyword = $("zeroFlowKeyword").value.trim();
@@ -535,47 +831,7 @@
     const status = $("zeroFlowStatus").value;
     const qs = new URLSearchParams({ sheet, keyword, risk, status, limit: "500" });
     const data = await api(`/api/zero-low-flow/view?${qs}`);
-    const thead = $("zeroFlowTable").querySelector("thead");
-    const tbody = $("zeroFlowTable").querySelector("tbody");
-    thead.innerHTML = "";
-    tbody.innerHTML = "";
-    const trh = document.createElement("tr");
-    data.columns.forEach((c) => {
-      const th = document.createElement("th");
-      th.textContent = c;
-      trh.appendChild(th);
-    });
-    thead.appendChild(trh);
-
-    if (!data.records.length) {
-      const tr = document.createElement("tr");
-      tr.className = "empty-row";
-      const td = document.createElement("td");
-      td.colSpan = Math.max(data.columns.length, 1);
-      td.textContent = "无匹配记录";
-      tr.appendChild(td);
-      tbody.appendChild(tr);
-    } else {
-      data.records.forEach((row) => {
-        const tr = document.createElement("tr");
-        data.columns.forEach((c) => {
-          const td = document.createElement("td");
-          const v = row[c];
-          td.textContent = v == null ? "" : String(v);
-          if (c === "风险等级" && v) {
-            td.dataset.risk = String(v);
-          }
-          tr.appendChild(td);
-        });
-        tbody.appendChild(tr);
-      });
-    }
-
-    const shown = data.records.length;
-    const meta = $("zeroFlowMeta");
-    if (meta) {
-      meta.textContent = `文件 ${data.file} · 共 ${data.total} 条，当前显示 ${shown} 条`;
-    }
+    renderZeroFlowTable(data);
   }
 
   function renderLoweffKpi(summary) {
@@ -792,8 +1048,18 @@
     $("clearLogBtn").onclick = () => { $("logBox").textContent = ""; };
     $("startCapacityBtn").onclick = () => startJob("/api/jobs/capacity");
     $("startPhysicalBtn").onclick = () => startJob("/api/jobs/physical");
+    if ($("startNrmSyncBtn")) {
+      $("startNrmSyncBtn").onclick = () => startJob("/api/jobs/nrm-sync");
+    }
     $("startLoweffBtn").onclick = () => startJob("/api/jobs/loweff");
     $("startZeroFlowBtn").onclick = () => startJob("/api/jobs/zero-low-flow", { reloadZeroFlow: true });
+    if ($("startZeroFlow5gBtn")) {
+      $("startZeroFlow5gBtn").onclick = () => startJob("/api/jobs/zero-low-flow-5g", { reloadZeroFlow: true });
+    }
+    $("zeroFlowFileInput").onchange = (e) => startZeroFlowWithFiles(e.target.files);
+    if ($("zeroFlow5gFileInput")) {
+      $("zeroFlow5gFileInput").onchange = (e) => startZeroFlow5gWithFiles(e.target.files);
+    }
     $("loadZeroFlowBtn").onclick = () => loadZeroFlow().catch((e) => alert(e.message));
     $("zeroFlowSheet").onchange = () => loadZeroFlow().catch(() => {});
     $("zeroFlowRisk").onchange = () => loadZeroFlow().catch(() => {});
@@ -833,6 +1099,26 @@
       }
     };
 
+
+    // Capacity results tab
+    $("capresTable").onchange = () => loadCapresults({ resetOffset: true }).catch(() => {});
+    $("capresSearchBtn").onclick = () => loadCapresults({ resetOffset: true }).catch((e) => alert(e.message));
+    $("capresReloadBtn").onclick = () => {
+      loadCapresSummary().catch(() => {});
+      loadCapresults({ resetOffset: true }).catch((e) => alert(e.message));
+    };
+    $("capresKeyword").onkeydown = (e) => {
+      if (e.key === "Enter") loadCapresults({ resetOffset: true }).catch((err) => alert(err.message));
+    };
+    $("capresPrevBtn").onclick = () => {
+      state.capResults.offset = Math.max(0, state.capResults.offset - state.capResults.limit);
+      loadCapresults({ resetOffset: false }).catch((e) => alert(e.message));
+    };
+    $("capresNextBtn").onclick = () => {
+      if (state.capResults.offset + state.capResults.limit >= state.capResults.total) return;
+      state.capResults.offset += state.capResults.limit;
+      loadCapresults({ resetOffset: false }).catch((e) => alert(e.message));
+    };
 
     $("pqSearchBtn").onclick = () => loadPhysQuery({ resetOffset: true }).catch((e) => alert(e.message));
     $("pqReloadBtn").onclick = () =>
@@ -884,8 +1170,97 @@
     };
   }
 
+  // ===== 主题切换（浅色 / 深色 / 跟随系统）=====
+  const THEME_KEY = "capphys-theme";
+  const ICON_SUN =
+    '<svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="5"/><line x1="12" y1="1" x2="12" y2="3"/><line x1="12" y1="21" x2="12" y2="23"/><line x1="4.22" y1="4.22" x2="5.64" y2="5.64"/><line x1="18.36" y1="18.36" x2="19.78" y2="19.78"/><line x1="1" y1="12" x2="3" y2="12"/><line x1="21" y1="12" x2="23" y2="12"/><line x1="4.22" y1="19.78" x2="5.64" y2="18.36"/><line x1="18.36" y1="5.64" x2="19.78" y2="4.22"/></svg>';
+  const ICON_MOON =
+    '<svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg>';
+
+  function getThemePref() {
+    const p = localStorage.getItem(THEME_KEY);
+    return p === "light" || p === "dark" ? p : "auto";
+  }
+
+  function effectiveTheme(pref) {
+    if (pref === "light" || pref === "dark") return pref;
+    return window.matchMedia &&
+      window.matchMedia("(prefers-color-scheme: light)").matches
+      ? "light"
+      : "dark";
+  }
+
+  function applyTheme(pref) {
+    const eff = effectiveTheme(pref);
+    document.documentElement.setAttribute("data-theme", eff);
+    document.documentElement.setAttribute("data-theme-pref", pref);
+    const btn = $("themeToggleBtn");
+    const menu = $("themeMenu");
+    if (btn) btn.innerHTML = eff === "light" ? ICON_SUN : ICON_MOON;
+    if (menu) {
+      menu.querySelectorAll("li[data-pref]").forEach((li) => {
+        const active = li.dataset.pref === pref;
+        li.classList.toggle("active", active);
+        li.setAttribute("aria-checked", active ? "true" : "false");
+      });
+    }
+  }
+
+  function initThemeSwitcher() {
+    applyTheme(getThemePref());
+
+    // 跟随系统：监听系统主题变化
+    if (window.matchMedia) {
+      const mq = window.matchMedia("(prefers-color-scheme: light)");
+      const handler = () => {
+        if (getThemePref() === "auto") applyTheme("auto");
+      };
+      if (mq.addEventListener) mq.addEventListener("change", handler);
+      else if (mq.addListener) mq.addListener(handler);
+    }
+
+    const btn = $("themeToggleBtn");
+    const menu = $("themeMenu");
+    if (!btn || !menu) return;
+
+    btn.addEventListener("click", (e) => {
+      e.stopPropagation();
+      const willOpen = menu.hidden;
+      menu.hidden = !willOpen;
+      btn.setAttribute("aria-expanded", String(willOpen));
+    });
+
+    menu.addEventListener("click", (e) => {
+      const li = e.target.closest("li[data-pref]");
+      if (!li) return;
+      const pref = li.dataset.pref;
+      localStorage.setItem(THEME_KEY, pref);
+      applyTheme(pref);
+      menu.hidden = true;
+      btn.setAttribute("aria-expanded", "false");
+    });
+
+    menu.addEventListener("keydown", (e) => {
+      if (e.key === "Escape" && !menu.hidden) {
+        menu.hidden = true;
+        btn.setAttribute("aria-expanded", "false");
+        btn.focus();
+      }
+    });
+
+    // 点击外部关闭
+    document.addEventListener("click", (e) => {
+      if (menu.hidden) return;
+      if (!e.target.closest(".theme-switcher")) {
+        menu.hidden = true;
+        btn.setAttribute("aria-expanded", "false");
+      }
+    });
+  }
+
   async function init() {
     bindEvents();
+    initThemeSwitcher();
     setProgress(0, "就绪");
     try {
       const current = await api("/api/jobs/current");

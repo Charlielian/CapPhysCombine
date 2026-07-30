@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import tempfile
 from pathlib import Path
 from typing import Any
@@ -7,11 +8,11 @@ from typing import Any
 import pandas as pd
 from fastapi import APIRouter, File, HTTPException, Query, UploadFile
 from fastapi.responses import FileResponse
-from pydantic import BaseModel, Field
+from pydantic import BaseModel
 
 from app.config import BASE_DIR
 from app.jsonutil import df_records
-from app.pipelines.core import CogCoverageManager
+from app.pipelines.cog_db import CogCoverageManager
 
 router = APIRouter(prefix="/api/cog", tags=["cog"])
 
@@ -81,17 +82,34 @@ def export_cog():
     )
 
 
+def _write_bytes_sync(path: Path, content: bytes) -> None:
+    """同步写文件（在工作线程中执行）。"""
+    with path.open("wb") as f:
+        f.write(content)
+
+
+def _import_cog_sync(tmp_path: Path, replace: bool) -> int:
+    """同步执行 DuckDB 导入（在工作线程中运行）。"""
+    with CogCoverageManager() as mgr:
+        return mgr.import_from_excel(tmp_path, replace=replace)
+
+
 @router.post("/import")
 async def import_cog(file: UploadFile = File(...), replace: bool = False):
+    """导入共站同覆盖表：异步读取 + run_in_executor 执行 DuckDB I/O。"""
     if not file.filename:
         raise HTTPException(status_code=400, detail="未选择文件")
     suffix = Path(file.filename).suffix or ".xlsx"
-    with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as tmp:
-        tmp.write(await file.read())
-        tmp_path = Path(tmp.name)
+    content = await file.read()
+    tmp_path = Path(tempfile.NamedTemporaryFile(delete=False, suffix=suffix).name)
+    loop = asyncio.get_event_loop()
+    # 写临时文件放到工作线程
+    await loop.run_in_executor(None, _write_bytes_sync, tmp_path, content)
     try:
-        with CogCoverageManager() as mgr:
-            count = mgr.import_from_excel(tmp_path, replace=replace)
+        # DuckDB 导入（CPU+I/O 密集）放到工作线程，避免阻塞事件循环
+        count = await loop.run_in_executor(
+            None, _import_cog_sync, tmp_path, replace
+        )
     except Exception as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     finally:

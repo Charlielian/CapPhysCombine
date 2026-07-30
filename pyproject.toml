@@ -1,0 +1,91 @@
+# 项目级工具配置：ruff (lint + format) / mypy (类型检查)
+# 仅在 pyproject.toml 中集中配置，避免多文件散落。
+
+[tool.ruff]
+line-length = 120
+target-version = "py310"
+extend-exclude = [
+    "scripts/legacy",
+    "dist",
+    "build",
+]
+
+[tool.ruff.lint]
+# 选用规则集（按收益排序）：
+#   E/W   - pycodestyle 错误/警告
+#   F     - pyflakes（未用 import / 未定义变量等真 bug）
+#   I     - isort（import 顺序）
+#   UP    - pyupgrade（向新版本语法靠拢）
+#   B     - bugbear（常见陷阱）
+#   SIM   - simplify（可简化写法）
+#   RUF   - ruff 自身规则
+select = ["E", "W", "F", "I", "UP", "B", "SIM", "RUF"]
+# 全局忽略（本项目的合理选择）：
+#   E501   - 行长由 formatter 管理，不强制截断（含中文行难拆）
+#   BLE001 - 宽 except 用于数据导入的优雅降级
+#   S110   - try-except-pass 同上
+#   DTZ001 / DTZ005 / DTZ006 - 本地工具不涉时区安全
+#   B008   - FastAPI 默认参数调用（per-file 已处理，此处兜底）
+#   RUF022 - __all__ 顺序不强制（手写顺序更具可读性）
+#   SIM117 - 嵌套 with 合并有时可读性更差
+ignore = [
+    "E501",
+    "BLE001",
+    "S110",
+    "DTZ001",
+    "DTZ005",
+    "DTZ006",
+    "B008",
+    "B905",
+    "RUF001",
+    "RUF002",
+    "RUF003",
+    "RUF022",
+    "SIM117",
+]
+
+[tool.ruff.lint.per-file-ignores]
+# 测试代码允许魔法值、assert、宽 except
+"tests/**" = ["PLR2004", "S101", "BLE001"]
+# FastAPI 路由默认参数使用 Query(...) / Depends(...) 是框架惯例
+"app/routers/**" = ["B008"]
+# 入口与 CLI 允许宽 except（保证长任务不中断）
+"app/jobs.py" = ["BLE001", "S110"]
+"app/pipelines/**" = ["BLE001", "S110"]
+
+[tool.ruff.format]
+quote-style = "double"
+indent-style = "space"
+
+# ------------------------------------------------------------------------------
+# mypy：宽松配置，逐步收紧
+# ------------------------------------------------------------------------------
+[tool.mypy]
+python_version = "3.10"
+# 项目尚未全面标注类型，先以"发现真问题"为目标，不强求完整标注
+ignore_missing_imports = true
+check_untyped_defs = true
+warn_unused_ignores = true
+warn_redundant_casts = true
+warn_unused_configs = true
+# 不强制要求装饰器/第三方库的完整类型
+disallow_untyped_decorators = false
+disallow_untyped_defs = false
+# 排除非业务代码
+exclude = [
+    "scripts/legacy/",
+    "build/",
+    "dist/",
+]
+
+# 第三方无类型 stub 的库不报警
+[[tool.mypy.overrides]]
+module = [
+    "duckdb.*",
+    "openpyxl.*",
+    "pyarrow.*",
+    "pandera.*",
+    "loguru.*",
+    "yaml.*",
+]
+ignore_missing_imports = true

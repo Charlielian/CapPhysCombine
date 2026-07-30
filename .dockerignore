@@ -1,0 +1,47 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# 数据 / 日志 / 缓存（运行期挂载，不进镜像）
+data/
+logs/
+.cache/
+
+# DuckDB 数据库（运行期挂载）
+*.db
+*.duckdb
+*.duckdb.wal
+
+# 输出 Excel
+*.xlsx
+*.xls
+*.xlsm
+
+# 构建产物
+dist/
+build/
+*.spec
+*.spec.bak
+
+# IDE / 系统
+.idea/
+.vscode/
+.DS_Store
+*.swp
+
+# Git
+.git/
+.gitignore
+
+# CI / 文档
+.github/
+scripts/legacy/
+
+# 容器自身文件
+Dockerfile
+docker-compose.yml
+.dockerignore

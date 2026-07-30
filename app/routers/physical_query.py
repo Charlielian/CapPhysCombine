@@ -9,7 +9,8 @@ import pandas as pd
 from fastapi import APIRouter, HTTPException, Query
 
 from app.jsonutil import df_records
-from app.pipelines.core import UNIFIED_DB_PATH, get_unified_db_connection
+from app.pipelines.cog_db import get_unified_db_connection
+from app.pipelines.paths import UNIFIED_DB_PATH
 
 router = APIRouter(prefix="/api/physical-query", tags=["physical-query"])
 
@@ -103,11 +104,7 @@ def _connect() -> duckdb.DuckDBPyConnection:
 
 def _table_exists(conn: duckdb.DuckDBPyConnection, table: str) -> bool:
     row = conn.execute(
-        """
-        SELECT 1 FROM information_schema.tables
-        WHERE table_name = ?
-        LIMIT 1
-        """,
+        "SELECT 1 FROM information_schema.tables WHERE table_name = ? LIMIT 1",
         [table],
     ).fetchone()
     return row is not None
@@ -250,9 +247,7 @@ def physical_query_view(
             "覆盖层": cover_layer,
             "共站制式情况": co_site,
         }
-        where_sql, params = _build_where(
-            dims, keyword, SEARCH_COLS[source], avail_set
-        )
+        where_sql, params = _build_where(dims, keyword, SEARCH_COLS[source], avail_set)
 
         count_sql = f"SELECT COUNT(*) FROM {_quote_ident(table)}{where_sql}"
         total = int(conn.execute(count_sql, params).fetchone()[0])
@@ -269,9 +264,7 @@ def physical_query_view(
             f"{where_sql} ORDER BY {_quote_ident(order_col)}"
             f" LIMIT ? OFFSET ?"
         )
-        df: pd.DataFrame = conn.execute(
-            data_sql, params + [limit, offset]
-        ).fetchdf()
+        df: pd.DataFrame = conn.execute(data_sql, params + [limit, offset]).fetchdf()
 
         return {
             "source": source,

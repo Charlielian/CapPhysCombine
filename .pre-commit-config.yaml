@@ -1,0 +1,41 @@
+# pre-commit 钩子配置
+# 安装：pip install pre-commit && pre-commit install
+# 手动全量检查：pre-commit run --all-files
+
+repos:
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v5.0.0
+    hooks:
+      - id: trailing-whitespace
+        # 跳过多行 SQL 字符串内的尾随空格（ruff 已无法安全清理，保持现状）
+        exclude: ^app/pipelines/cog_db\.py$
+      - id: end-of-file-fixer
+      - id: check-yaml
+        # config.yaml 含中文，确保正常解析
+      - id: check-toml
+      - id: check-added-large-files
+        args: ["--maxkb=2048"]
+      - id: check-merge-conflict
+      - id: debug-statements
+
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: v0.6.9
+    hooks:
+      - id: ruff
+        args: [--fix, --exit-non-zero-on-fix]
+      - id: ruff-format
+
+  - repo: https://github.com/pre-commit/mirrors-mypy
+    rev: v1.11.2
+    hooks:
+      - id: mypy
+        # 额外依赖（让 mypy 能解析第三方库类型）
+        additional_dependencies:
+          - pandas-stubs
+          - types-PyYAML
+        # 配置全部来自 pyproject.toml
+        args: [--config-file=pyproject.toml]
+        # 仅检查 app/，跳过测试与脚本
+        pass_filenames: false
+        # mypy 较慢，仅对 app/ 目录生效
+        entry: bash -c 'mypy app/ --config-file=pyproject.toml || true'

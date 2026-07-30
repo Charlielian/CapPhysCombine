@@ -1,3 +1,5 @@
+"""物理表扩展 API：扇区冲突检测/修正、低效与零低流量结果查看。"""
+
 from __future__ import annotations
 
 from pathlib import Path
@@ -7,7 +9,8 @@ from fastapi import APIRouter, HTTPException, Query
 
 from app.config import BASE_DIR, LOWEFF_OUTPUT_PATH
 from app.jsonutil import df_records
-from app.pipelines.core import (
+from app.pipelines.io import read_excel
+from app.pipelines.sector import (
     detect_sector_conflicts,
     run_physical_table_sector_fix,
 )
@@ -26,7 +29,7 @@ def check_conflicts(path: str | None = None):
     if not excel.is_file():
         raise HTTPException(status_code=404, detail=f"文件不存在: {excel.name}")
     try:
-        df = pd.read_excel(excel)
+        df = read_excel(excel)
         conflicts = detect_sector_conflicts(df)
     except Exception as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
@@ -51,7 +54,7 @@ def fix_conflicts(path: str | None = None):
     except Exception as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
-    files = []
+    files: list[str] = []
     base_name = excel.stem
     for name in (
         f"{base_name}-已修正.xlsx",
@@ -86,8 +89,8 @@ def loweff_view(
         "4g_all": "全量4G小区评估",
     }
     try:
-        df = pd.read_excel(LOWEFF_OUTPUT_PATH, sheet_name=sheet_map[sheet])
-        summary_df = pd.read_excel(LOWEFF_OUTPUT_PATH, sheet_name="统计汇总")
+        df = read_excel(LOWEFF_OUTPUT_PATH, sheet_name=sheet_map[sheet])
+        summary_df = read_excel(LOWEFF_OUTPUT_PATH, sheet_name="统计汇总")
     except Exception as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
@@ -101,7 +104,7 @@ def loweff_view(
             mask = mask | df[col].astype(str).str.contains(keyword, case=False, na=False)
         df = df[mask]
 
-    summary = {}
+    summary: dict = {}
     if not summary_df.empty and {"指标", "数值"}.issubset(summary_df.columns):
         for _, row in summary_df.iterrows():
             key = str(row["指标"]).strip()
@@ -136,7 +139,7 @@ def zero_low_flow_view(
         "all": "全量监控明细",
     }
     try:
-        df = pd.read_excel(path, sheet_name=sheet_map[sheet])
+        df = read_excel(path, sheet_name=sheet_map[sheet])
     except Exception as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
@@ -158,4 +161,3 @@ def zero_low_flow_view(
         "records": _df_records(df, limit=limit),
         "file": path.name,
     }
-

@@ -1,0 +1,43 @@
+# CapPhysCombine 容器编排
+# 用法：
+#   docker compose up -d                       # 启动 Web 服务
+#   docker compose logs -f                     # 跟踪日志
+#   docker compose down                        # 停止
+#   docker compose run --rm app capacity       # 运行 CLI 子命令（capacity / physical / loweff / zero-low-flow）
+#   docker compose run --rm app sector check -i 物理表汇总结果.xlsx
+
+services:
+  app:
+    build: .
+    image: capphys:latest
+    container_name: capphys
+    restart: unless-stopped
+    # 容器内绑定 0.0.0.0 + 4008，由环境变量覆盖 config.yaml
+    environment:
+      CAPPHYS_HOST: "0.0.0.0"
+      CAPPHYS_PORT: "4008"
+    ports:
+      # 宿主机:容器；如需改宿主端口，仅改左侧
+      - "4008:4008"
+    volumes:
+      # 输入数据（Excel 源文件）
+      - ./data:/app/data
+      # 日志
+      - ./logs:/app/logs
+      # Parquet 中间层缓存
+      - ./.cache:/app/.cache
+      # 物理表汇总依赖的 GeoJSON 目录（仓库自带，挂载以便宿主更新生效）
+      - ./区域:/app/区域
+      - ./网格:/app/网格
+      - ./路测网格:/app/路测网格
+      # 注：DuckDB 数据库（*.db）与结果 Excel 写到容器 /app，
+      #     容器重建后需重新运行导入流程；如需持久化，可取消下行注释
+      #     （首次使用前需在宿主 touch capphys.db capphys_unified.db，否则会被建成目录）
+      # - ./capphys.db:/app/capphys.db
+      # - ./capphys_unified.db:/app/capphys_unified.db
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:4008/api/health', timeout=3).status==200 else 1)"]
+      interval: 30s
+      timeout: 5s
+      start_period: 20s
+      retries: 3

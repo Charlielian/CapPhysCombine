@@ -4,7 +4,25 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>CapPhysCombine 工作台</title>
-  <link rel="stylesheet" href="/static/css/app.css?v=1784300001" />
+  <link rel="stylesheet" href="/static/css/app.css?v=1785048000" />
+  <script>
+    // 防 FOUC：在首屏渲染前根据 localStorage 与系统偏好设定主题
+    (function () {
+      try {
+        var pref = localStorage.getItem("capphys-theme") || "auto";
+        var eff = pref;
+        if (pref === "auto") {
+          eff = window.matchMedia &&
+            window.matchMedia("(prefers-color-scheme: light)").matches
+            ? "light" : "dark";
+        }
+        document.documentElement.setAttribute("data-theme", eff);
+        document.documentElement.setAttribute("data-theme-pref", pref);
+      } catch (e) {
+        document.documentElement.setAttribute("data-theme", "dark");
+      }
+    })();
+  </script>
 </head>
 <body>
   <div class="app-shell">
@@ -13,6 +31,9 @@
       <div class="sidebar-brand">CPC</div>
       <button class="tab active" data-tab="capacity" data-tooltip="容量表合成" type="button">
         <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="12,2 2,7 12,12 22,7"/><polyline points="2,17 12,22 22,17"/><polyline points="2,12 12,17 22,12"/></svg>
+      </button>
+      <button class="tab" data-tab="capresults" data-tooltip="合成结果" type="button">
+        <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/><polyline points="10 9 9 9 8 9"/></svg>
       </button>
       <button class="tab" data-tab="physical" data-tooltip="物理表汇总" type="button">
         <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M3 9h18M3 15h18M9 3v18M15 3v18"/></svg>
@@ -50,6 +71,26 @@
             <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="23 4 23 10 17 10"/><polyline points="1 20 1 14 7 14"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/></svg>
             刷新状态
           </button>
+          <div class="theme-switcher">
+            <button id="themeToggleBtn" class="btn secondary" type="button" aria-haspopup="menu" aria-expanded="false" aria-label="切换主题" title="切换主题"></button>
+            <ul id="themeMenu" class="theme-menu" role="menu" hidden>
+              <li role="menuitemradio" aria-checked="false" data-pref="light" tabindex="0">
+                <svg class="tm-icon" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="5"/><line x1="12" y1="1" x2="12" y2="3"/><line x1="12" y1="21" x2="12" y2="23"/><line x1="4.22" y1="4.22" x2="5.64" y2="5.64"/><line x1="18.36" y1="18.36" x2="19.78" y2="19.78"/><line x1="1" y1="12" x2="3" y2="12"/><line x1="21" y1="12" x2="23" y2="12"/><line x1="4.22" y1="19.78" x2="5.64" y2="18.36"/><line x1="18.36" y1="5.64" x2="19.78" y2="4.22"/></svg>
+                <span>浅色</span>
+                <svg class="tm-check" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>
+              </li>
+              <li role="menuitemradio" aria-checked="false" data-pref="dark" tabindex="0">
+                <svg class="tm-icon" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg>
+                <span>深色</span>
+                <svg class="tm-check" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>
+              </li>
+              <li role="menuitemradio" aria-checked="false" data-pref="auto" tabindex="0">
+                <svg class="tm-icon" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="3" width="20" height="14" rx="2"/><line x1="8" y1="21" x2="16" y2="21"/><line x1="12" y1="17" x2="12" y2="21"/></svg>
+                <span>跟随系统</span>
+                <svg class="tm-check" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>
+              </li>
+            </ul>
+          </div>
         </div>
       </header>
 
@@ -66,12 +107,42 @@
             </div>
           </section>
 
+          <!-- Tab: 合成结果（数据库持久化查看） -->
+          <section id="panel-capresults" class="tab-panel card">
+            <h2 class="card-title">容量表合成结果</h2>
+            <p class="card-desc">查看已持久化到数据库的合成结果，每次生成会自动更新</p>
+            <div id="capresKpi" class="kpi-grid"></div>
+            <div class="filters">
+              <select id="capresTable" class="input">
+                <option value="合成_5G容量表" selected>5G 容量表</option>
+                <option value="合成_4G容量表">4G 容量表</option>
+                <option value="合成_45G容量表">45G 容量表</option>
+              </select>
+              <input id="capresKeyword" type="search" class="input" placeholder="CGI / NCGI / 小区名称 / 地市..." style="flex:1;min-width:200px" />
+              <button id="capresSearchBtn" class="btn primary" type="button">查询</button>
+              <button id="capresReloadBtn" class="btn secondary" type="button">刷新</button>
+            </div>
+            <p id="capresMeta" class="meta" style="color:var(--muted);font-size:13px;margin:8px 0 0"></p>
+            <div class="table-wrap">
+              <table id="capresTable_el">
+                <thead></thead>
+                <tbody></tbody>
+              </table>
+            </div>
+            <div class="btn-row" style="justify-content:space-between">
+              <button id="capresPrevBtn" class="btn secondary" type="button">上一页</button>
+              <span id="capresPageInfo" class="meta" style="color:var(--muted);font-size:13px"></span>
+              <button id="capresNextBtn" class="btn secondary" type="button">下一页</button>
+            </div>
+          </section>
+
           <!-- Tab 2: 物理表汇总 -->
           <section id="panel-physical" class="tab-panel card">
             <h2 class="card-title">物理表汇总</h2>
             <p class="card-desc">读取 4G/5G 工参与 GeoJSON，生成物理表汇总结果</p>
             <div class="card-actions">
               <button id="startPhysicalBtn" class="btn primary" type="button">开始汇总物理表</button>
+              <button id="startNrmSyncBtn" class="btn secondary" type="button">同步网管 PCI/TAC/频点</button>
               <button id="checkConflictBtn" class="btn secondary" type="button">检测扇区冲突</button>
               <button id="fixConflictBtn" class="btn secondary" type="button">修正扇区冲突</button>
             </div>
@@ -186,9 +257,20 @@
           <!-- Tab: 零低流量风险 -->
           <section id="panel-zeroflow" class="tab-panel card">
             <h2 class="card-title">零低流量风险小区分析</h2>
-            <p class="card-desc">基于 data/ 下「重要场景-天*.xlsx」生成零流量/低流量风险监控报表，并可在线筛选查看</p>
+            <p class="card-desc">基于天流量文件生成零流量/低流量风险监控报表，并可在线筛选查看。<br>4G规则：零流量=连续≥2天0，低流量=连续≥2天 &lt;0.1GB<br>5G规则：零流量=连续≥2天0或空，低流量=连续≥2天 &lt;3GB</p>
             <div class="card-actions">
               <button id="startZeroFlowBtn" class="btn primary" type="button">开始零低流量分析</button>
+              <button id="startZeroFlow5gBtn" class="btn primary" type="button" style="background:var(--primary-dark,#2563eb)">5G零低流量分析</button>
+              <label class="btn secondary upload-btn">
+                <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
+                导入文件并分析
+                <input id="zeroFlowFileInput" type="file" multiple accept=".xlsx,.xls" hidden />
+              </label>
+              <label class="btn secondary upload-btn" id="zeroFlow5gUploadLabel">
+                <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
+                导入5G文件并分析
+                <input id="zeroFlow5gFileInput" type="file" multiple accept=".xlsx,.xls" hidden />
+              </label>
               <button id="loadZeroFlowBtn" class="btn secondary" type="button">加载结果</button>
             </div>
             <div class="filters">
@@ -271,15 +353,22 @@
           </section>
         </div>
 
-        <!-- Right side panel: data status -->
+        <!-- Right side panel: data status (HTMX 局部刷新；离线时由 app.js 回退为 JSON 刷新) -->
         <aside class="side-panel">
-          <h3>数据文件状态</h3>
-          <h4>容量表源文件</h4>
-          <ul id="capacityStatus" class="status-list"></ul>
-          <h4>物理表工参</h4>
-          <ul id="physicalStatus" class="status-list"></ul>
-          <h4>可下载结果</h4>
-          <ul id="outputList" class="status-list"></ul>
+          <div
+            id="statusPanel"
+            hx-get="/api/data/status-fragment"
+            hx-trigger="load, every 30s, statusChanged from:body"
+            hx-swap="innerHTML"
+          >
+            <h3>数据文件状态</h3>
+            <h4>容量表源文件</h4>
+            <ul id="capacityStatus" class="status-list"></ul>
+            <h4>物理表工参</h4>
+            <ul id="physicalStatus" class="status-list"></ul>
+            <h4>可下载结果</h4>
+            <ul id="outputList" class="status-list"></ul>
+          </div>
         </aside>
       </div>
     </div>
@@ -306,6 +395,7 @@
     </form>
   </dialog>
 
-  <script src="/static/js/app.js?v=1784300001"></script>
+  <script src="https://unpkg.com/htmx.org@1.9.12" crossorigin="anonymous"></script>
+  <script src="/static/js/app.js?v=1784300005"></script>
 </body>
 </html>

@@ -15,10 +15,10 @@ from pathlib import Path
 from typing import Callable, Iterable
 
 import duckdb
-import geopandas as gpd
 import numpy as np
 import pandas as pd
-from shapely.geometry import Point
+
+from app.pipelines.spatial import get_grid_by_coords_batch as _duckdb_spatial_batch
 
 # ==============================================================================
 # 物理表模块常量定义
@@ -187,45 +187,9 @@ def extract_sectionid(name):
 # ==============================================================================
 # 物理表模块：空间查询 (spatial.py)
 # ==============================================================================
-
-def load_geojson_with_index(file_path):
-    """加载 GeoJSON 并返回 (gdf, spatial_index)，文件不存在或为空则索引为 None。"""
-    if not os.path.exists(file_path):
-        return None, None
-    gdf = gpd.read_file(file_path)
-    if len(gdf) == 0:
-        return gdf, None
-    return gdf, gdf.sindex
-
-
-def _is_invalid_coord(lon, lat):
-    if pd.isna(lon) or pd.isna(lat):
-        return True
-    if lon == 0 or lat == 0 or str(lon) == "***":
-        return True
-    return False
-
-
-def get_grid_by_coords_batch(gdf, sindex, lons, lats):
-    """批量根据经纬度做点在多边形内查询，返回每点匹配的 GeoSeries 行或 None。"""
-    if gdf is None or sindex is None:
-        return [None] * len(lons)
-
-    results = [None] * len(lons)
-    for i in range(len(lons)):
-        lon, lat = lons[i], lats[i]
-        if _is_invalid_coord(lon, lat):
-            continue
-        try:
-            point = Point(float(lon), float(lat))
-            for idx in sindex.intersection(point.bounds):
-                if gdf.iloc[idx].geometry.contains(point):
-                    results[i] = gdf.iloc[idx]
-                    break
-        except (ValueError, TypeError):
-            pass
-    return results
-
+# 注意：空间查询已迁移到 app/pipelines/spatial.py，使用 DuckDB Spatial 扩展。
+# 旧的 GeoPandas + Shapely 实现已被 _duckdb_spatial_batch 替代，
+# 其接口签名：get_grid_by_coords_batch(geojson_path, lons, lats) -> list[dict|None]
 
 # ==============================================================================
 # 物理表模块：距离聚类 (clustering.py)
@@ -433,7 +397,7 @@ def calc_nr_freq(band, band_a):
 
 
 def read_nr_cellant(file_path: str) -> pd.DataFrame:
-    df = pd.read_excel(file_path)
+    df = read_excel(Path(file_path))
     result = pd.DataFrame(
         {
             "网络制式": "5G",
@@ -465,7 +429,7 @@ def read_nr_cellant(file_path: str) -> pd.DataFrame:
 
 
 def read_lte_cellant(file_path: str) -> pd.DataFrame:
-    df = pd.read_excel(file_path)
+    df = read_excel(Path(file_path))
     net_types = df["网络制式"].fillna("")
     cell_names = df["小区名称"].fillna("")
     band_a_list = df["详细使用频段"].fillna("")
@@ -533,7 +497,7 @@ def read_lte_cellant(file_path: str) -> pd.DataFrame:
 
 
 def read_common_coverage(file_path: str) -> pd.DataFrame:
-    df = pd.read_excel(file_path)
+    df = read_excel(Path(file_path))
     region = df["小区所属区域"].fillna("")
     region = region.where(region != "", df["小区所属区域类型"].fillna(""))
     # Ensure 覆盖层 is always string (handle boolean from Excel)
@@ -747,7 +711,7 @@ class CogCoverageManager:
         
         模板列：CGI, 共站同覆盖名, 物理站名, 小区名称, 使用频段, 是否覆盖层, 小区所属区域, 路测网格, 经度, 纬度, sectionid
         """
-        df = pd.read_excel(excel_path, dtype_backend="numpy_nullable")
+        df = read_excel(Path(excel_path))
         
         # 标准化列名（按模板列名）
         column_mapping = {
@@ -1135,12 +1099,10 @@ def load_cog_coverage_mapping(
 
 
 def read_excel(path: Path) -> pd.DataFrame:
-    """快速读取 Excel 文件"""
-    return pd.read_excel(
-        path,
-        engine="openpyxl",
-        dtype_backend="numpy_nullable",
-    )
+    """快速读取 Excel 文件 — 委托给 io 模块（自动使用 calamine 引擎）。"""
+    from app.pipelines.io import read_excel as _io_read_excel
+
+    return _io_read_excel(path)
 
 
 DB_PATH = BASE_DIR / "capphys.db"
@@ -1167,53 +1129,10 @@ def excel_to_db(
     chunk_size: int = CHUNK_SIZE,
     append: bool = False,
 ) -> int:
-    logger = logger or GuiLogger()
-    mode = "追加" if append else "导入"
-    logger.log(f"  分批{mode} {path.name} -> {table_name} (每批 {chunk_size} 行)")
-    
-    from openpyxl import load_workbook
-    
-    wb = load_workbook(filename=str(path), read_only=True, data_only=True)
-    ws = wb.active
-    rows_iter = ws.iter_rows(values_only=True)
-    
-    try:
-        headers = next(rows_iter)
-    except StopIteration:
-        wb.close()
-        return 0
-    
-    headers = [str(h) if h is not None else f"col_{i}" for i, h in enumerate(headers)]
-    total_rows = 0
-    chunk: list[tuple] = []
-    first_write = not append
-    
-    for row in rows_iter:
-        chunk.append(row)
-        if len(chunk) >= chunk_size:
-            df_chunk = pd.DataFrame(chunk, columns=headers)
-            tmp_name = f"_tmp_{table_name}"
-            conn.register(tmp_name, df_chunk)
-            if first_write:
-                conn.execute(f"CREATE OR REPLACE TABLE \"{table_name}\" AS SELECT * FROM {tmp_name}")
-                first_write = False
-            else:
-                conn.execute(f"INSERT INTO \"{table_name}\" SELECT * FROM {tmp_name}")
-            total_rows += len(chunk)
-            chunk = []
-    
-    if chunk:
-        df_chunk = pd.DataFrame(chunk, columns=headers)
-        tmp_name = f"_tmp_{table_name}"
-        conn.register(tmp_name, df_chunk)
-        if first_write:
-            conn.execute(f"CREATE OR REPLACE TABLE \"{table_name}\" AS SELECT * FROM {tmp_name}")
-        else:
-            conn.execute(f"INSERT INTO \"{table_name}\" SELECT * FROM {tmp_name}")
-        total_rows += len(chunk)
-    
-    wb.close()
-    return total_rows
+    """大表分批导入 — 委托给 io 模块。"""
+    from app.pipelines.io import excel_to_db as _io_excel_to_db
+
+    return _io_excel_to_db(path, table_name, conn, logger=logger, chunk_size=chunk_size, append=append)
 
 
 def small_excel_to_db(
@@ -1223,20 +1142,10 @@ def small_excel_to_db(
     logger: GuiLogger | None = None,
     append: bool = False,
 ) -> int:
-    logger = logger or GuiLogger()
-    df = pd.read_excel(path, engine="openpyxl", dtype_backend="numpy_nullable")
-    df.columns = [str(c) for c in df.columns]
-    
-    mode = "追加" if append else "导入"
-    tmp_name = f"_tmp_{table_name}"
-    conn.register(tmp_name, df)
-    if append:
-        conn.execute(f"INSERT INTO \"{table_name}\" SELECT * FROM {tmp_name}")
-    else:
-        conn.execute(f"CREATE OR REPLACE TABLE \"{table_name}\" AS SELECT * FROM {tmp_name}")
-    
-    logger.log(f"  {mode} {path.name} -> {table_name} ({len(df)} 行)")
-    return len(df)
+    """小表导入 — 委托给 io 模块。"""
+    from app.pipelines.io import small_excel_to_db as _io_small_excel_to_db
+
+    return _io_small_excel_to_db(path, table_name, conn, logger=logger, append=append)
 
 
 def db_to_dataframe(query: str, conn: duckdb.DuckDBPyConnection) -> pd.DataFrame:
@@ -2584,33 +2493,28 @@ class PhysicalTableAggregator:
                 cc_lookup = build_cc_lookup(cc_df)
                 print(f"已从Excel加载共站同覆盖小区表: {cc_path.name}, {len(cc_lookup)} 条")
 
-        # 加载地理边界文件（从BASE_DIR子目录）
-        print("\n加载地理边界文件（带空间索引）...")
+        # 加载地理边界文件（使用 DuckDB Spatial 批量点在多边形内查询）
+        print("\n加载地理边界文件（DuckDB Spatial）...")
         base = Path(self.base_dir)
-        loadtest_gdf, loadtest_sindex = load_geojson_with_index(
-            base / "路测网格" / "loadtest_grid.geojson"
-        )
-        region_gdf, region_sindex = load_geojson_with_index(
-            base / "区域" / "阳江五区域.geojson"
-        )
-        grid_gdf, grid_sindex = load_geojson_with_index(
-            base / "网格" / "grid_yj.geojson"
-        )
-        town_gdf, town_sindex = load_geojson_with_index(
-            base / "乡镇" / "镇界.geojson"
-        )
 
         print(f"共站同覆盖小区表索引构建完成: {len(cc_lookup)} 条CGI记录")
 
         print("\n执行批量空间查询...")
         lons = all_cells["经度"].values
         lats = all_cells["纬度"].values
-        loadtest_results = get_grid_by_coords_batch(
-            loadtest_gdf, loadtest_sindex, lons, lats
+
+        loadtest_results = _duckdb_spatial_batch(
+            base / "路测网格" / "loadtest_grid.geojson", lons, lats
         )
-        region_results = get_grid_by_coords_batch(region_gdf, region_sindex, lons, lats)
-        grid_results = get_grid_by_coords_batch(grid_gdf, grid_sindex, lons, lats)
-        town_results = get_grid_by_coords_batch(town_gdf, town_sindex, lons, lats)
+        region_results = _duckdb_spatial_batch(
+            base / "区域" / "阳江五区域.geojson", lons, lats
+        )
+        grid_results = _duckdb_spatial_batch(
+            base / "网格" / "grid_yj.geojson", lons, lats
+        )
+        town_results = _duckdb_spatial_batch(
+            base / "乡镇" / "镇界.geojson", lons, lats
+        )
 
         print("提取地理信息...")
         loadtest_grid_ids = [
@@ -2873,7 +2777,7 @@ def run_physical_table_sector_fix(
         return {}
     
     progress.update(15, f"读取物理表: {os.path.basename(input_path)}")
-    df = pd.read_excel(input_path)
+    df = read_excel(Path(input_path))
     
     progress.update(40, "检测扇区冲突...")
     conflicts = detect_sector_conflicts(df)

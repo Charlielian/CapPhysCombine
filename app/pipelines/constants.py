@@ -1,6 +1,6 @@
 """Shared constants re-exports."""
 
-from app.pipelines.core import (
+from app.pipelines.common import (
     BAND_3DMIMO,
     COVERAGE_LAYER_MAP,
     DISTANCE_INDOOR_M,

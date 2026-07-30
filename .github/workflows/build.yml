@@ -45,6 +45,7 @@ jobs:
           mkdir dist\CapPhysCombine\data
           echo "将源数据 Excel 文件放入此目录" > dist\CapPhysCombine\data\请将数据文件放入此目录.txt
           mkdir dist\CapPhysCombine\logs
+          copy config.yaml dist\CapPhysCombine\
 
       - name: Package as ZIP
         run: |
