@@ -87,14 +87,28 @@ PHYSICAL_TABLE_AVAILABLE = True
 
 
 def _get_base_dir() -> Path:
-    """返回项目根目录（兼容 PyInstaller 打包和源码运行）。"""
+    """返回项目根目录（兼容 PyInstaller 打包和源码运行）。
+
+    打包后为 exe 同级目录，用于用户数据（data/logs/输出文件/config.yaml）。
+    """
     if getattr(sys, "frozen", False):
         return Path(sys.executable).resolve().parent
     # app/pipelines/core.py -> project root
     return Path(__file__).resolve().parent.parent.parent
 
 
+def _get_resource_dir() -> Path:
+    """返回只读资源目录（打包后为 _internal，源码运行时同 BASE_DIR）。
+
+    用于查找随程序分发的只读资源（区域/网格/路测网格 等 GeoJSON 边界文件）。
+    """
+    if getattr(sys, "frozen", False) and hasattr(sys, "_MEIPASS"):
+        return Path(sys._MEIPASS)
+    return BASE_DIR
+
+
 BASE_DIR = _get_base_dir()
+RESOURCE_DIR = _get_resource_dir()
 DATA_DIR = BASE_DIR / "data"
 LOG_DIR = BASE_DIR / "logs"
 LOG_RETENTION_DAYS = 7
@@ -2502,7 +2516,6 @@ class PhysicalTableAggregator:
 
         # 加载地理边界文件（使用 DuckDB Spatial 批量点在多边形内查询）
         print("\n加载地理边界文件（DuckDB Spatial）...")
-        base = Path(self.base_dir)
 
         print(f"共站同覆盖小区表索引构建完成: {len(cc_lookup)} 条CGI记录")
 
@@ -2511,16 +2524,16 @@ class PhysicalTableAggregator:
         lats = all_cells["纬度"].values
 
         loadtest_results = _duckdb_spatial_batch(
-            base / "路测网格" / "loadtest_grid.geojson", lons, lats
+            RESOURCE_DIR / "路测网格" / "loadtest_grid.geojson", lons, lats
         )
         region_results = _duckdb_spatial_batch(
-            base / "区域" / "阳江五区域.geojson", lons, lats
+            RESOURCE_DIR / "区域" / "阳江五区域.geojson", lons, lats
         )
         grid_results = _duckdb_spatial_batch(
-            base / "网格" / "grid_yj.geojson", lons, lats
+            RESOURCE_DIR / "网格" / "grid_yj.geojson", lons, lats
         )
         town_results = _duckdb_spatial_batch(
-            base / "乡镇" / "镇界.geojson", lons, lats
+            RESOURCE_DIR / "乡镇" / "镇界.geojson", lons, lats
         )
 
         print("提取地理信息...")
