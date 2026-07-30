@@ -1,0 +1,83 @@
+version: '1.0'
+
+# 流水线唯一标识
+name: build-exe
+
+# 流水线显示名称
+displayName: 构建 Windows EXE
+
+# 触发事件
+triggers:
+  push:
+    branches:
+      precise:
+        - main
+    tags:
+      prefix:
+        - v
+
+# 流水线级参数
+variables:
+  # Windows Python 版本（PyInstaller 需在目标平台运行，这里用 Wine + Windows Python 交叉构建）
+  WIN_PYTHON_VERSION: '3.12.3'
+
+stages:
+  - stage: build
+    displayName: PyInstaller 跨平台构建
+    strategy: fast
+    trigger: auto
+    steps:
+      - step: build@python
+        name: build_exe
+        displayName: 构建 Windows EXE (Wine)
+        pythonVersion: '3.9'
+        commands:
+          - echo "===== [1/7] 安装 Wine 及系统依赖 ====="
+          - yum install -y epel-release
+          - yum install -y wine wine-mono wine-gecko xorg-x11-server-Xvb zip unzip curl
+          - export WINEDEBUG=-all
+          - export DISPLAY=:99
+          - Xvfb :99 -screen 0 1024x768x24 &
+          - sleep 2
+
+          - echo "===== [2/7] 下载 Windows Python 安装包 ====="
+          - curl -L --retry 3 -o /tmp/python-installer.exe "https://www.python.org/ftp/python/${WIN_PYTHON_VERSION}/python-${WIN_PYTHON_VERSION}-amd64.exe"
+
+          - echo "===== [3/7] 静默安装 Windows Python 到 Wine 环境 ====="
+          - wine /tmp/python-installer.exe /quiet InstallAllUsers=1 PrependPath=1 Include_pip=1 TargetDir=C:\\Python312 || true
+          - sleep 5
+          - wine C:\\Python312\\python.exe --version
+
+          - echo "===== [4/7] 安装项目依赖到 Windows Python ====="
+          - wine C:\\Python312\\python.exe -m pip install --upgrade pip
+          - wine C:\\Python312\\python.exe -m pip install -r requirements.txt
+          - wine C:\\Python312\\python.exe -m pip install pyinstaller
+
+          - echo "===== [5/7] 使用 PyInstaller 构建 EXE ====="
+          - wine C:\\Python312\\python.exe -m PyInstaller CapPhysCombine.spec --noconfirm
+
+          - echo "===== [6/7] 后处理：拷贝运行时依赖与配置 ====="
+          - mkdir -p dist/CapPhysCombine/data
+          - mkdir -p dist/CapPhysCombine/logs
+          - cp config.yaml dist/CapPhysCombine/
+          - printf '将源数据 Excel 文件放入此目录后运行 CapPhysCombine.exe\n' > dist/CapPhysCombine/data/请将数据文件放入此目录.txt
+
+          - echo "===== [7/7] 打包 ZIP 制品 ====="
+          - cd dist && zip -r -q CapPhysCombine.zip CapPhysCombine && cd ..
+          - echo "构建完成，产物：dist/CapPhysCombine.zip"
+        artifacts:
+          - name: BUILD_ARTIFACT
+            path:
+              - ./dist/CapPhysCombine.zip
+
+  - stage: publish
+    displayName: 发布制品
+    strategy: naturally
+    trigger: auto
+    steps:
+      - step: publish@general_artifacts
+        name: publish_artifacts
+        displayName: 上传 EXE 制品
+        dependArtifact: BUILD_ARTIFACT
+        artifactRepository: default
+        artifactName: capphyscombine-exe
