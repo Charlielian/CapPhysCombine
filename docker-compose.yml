@@ -12,13 +12,12 @@ services:
     image: capphys:latest
     container_name: capphys
     restart: unless-stopped
-    # 容器内绑定 0.0.0.0 + 4008，由环境变量覆盖 config.yaml
+    # 端口由 config.yaml 决定，不再用环境变量覆盖
     environment:
       CAPPHYS_HOST: "0.0.0.0"
-      CAPPHYS_PORT: "4008"
     ports:
       # 宿主机:容器；如需改宿主端口，仅改左侧
-      - "4008:4008"
+      - "9008:9008"
     volumes:
       # 输入数据（Excel 源文件）
       - ./data:/app/data
@@ -36,7 +35,7 @@ services:
       # - ./capphys.db:/app/capphys.db
       # - ./capphys_unified.db:/app/capphys_unified.db
     healthcheck:
-      test: ["CMD", "python", "-c", "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:4008/api/health', timeout=3).status==200 else 1)"]
+      test: ["CMD", "python", "-c", "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:9008/api/health', timeout=3).status==200 else 1)"]
       interval: 30s
       timeout: 5s
       start_period: 20s

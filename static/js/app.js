@@ -46,6 +46,16 @@
       const detail = body && body.detail ? body.detail : body || res.statusText;
       throw new Error(typeof detail === "string" ? detail : JSON.stringify(detail));
     }
+    // Unwrap SuccessResponse / ErrorResponse envelopes from FastAPI routers
+    if (body && typeof body === "object" && "ok" in body) {
+      if (body.ok === true && "data" in body) {
+        return body.data;
+      }
+      if (body.ok === false && body.error) {
+        const err = body.error;
+        throw new Error(err.detail || err.message || JSON.stringify(err));
+      }
+    }
     return body;
   }
 
@@ -381,18 +391,25 @@
     }
   }
 
-  async function startZeroFlowWithFiles(fileList) {
+  async function startZeroFlowWithFiles(fileList, network) {
     if (!fileList || !fileList.length) return;
     const formData = new FormData();
     for (const f of fileList) formData.append("files", f);
+    const label = network === "5g" ? "5G" : "4G";
     try {
       setBusy(true);
       $("logBox").textContent = "";
-      setProgress(0, `导入 ${fileList.length} 个文件并启动分析...`);
+      setProgress(0, `导入 ${fileList.length} 个${label}文件...`);
       renderResultLinks([]);
-      const job = await api("/api/jobs/zero-low-flow/run", {
+      // Step 1: upload files to data/
+      const uploadRes = await api("/api/data/upload", { method: "POST", body: formData });
+      appendLog([`已上传 ${uploadRes.count} 个文件: ${(uploadRes.saved || []).join(", ")}`]);
+      // Step 2: start zero-low-flow job with uploaded file paths
+      setProgress(10, `启动${label}零低流量分析...`);
+      const job = await api("/api/jobs/start/zero-low-flow", {
         method: "POST",
-        body: formData,
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ file_paths: uploadRes.saved, network: network || "4g" }),
       });
       state.jobId = job.id;
       if (state.pollTimer) clearInterval(state.pollTimer);
@@ -403,33 +420,8 @@
       appendLog([`启动失败: ${err.message}`]);
       setProgress(0, "启动失败");
     } finally {
-      $("zeroFlowFileInput").value = "";
-    }
-  }
-
-  async function startZeroFlow5gWithFiles(fileList) {
-    if (!fileList || !fileList.length) return;
-    const formData = new FormData();
-    for (const f of fileList) formData.append("files", f);
-    try {
-      setBusy(true);
-      $("logBox").textContent = "";
-      setProgress(0, `导入 ${fileList.length} 个5G文件并启动分析...`);
-      renderResultLinks([]);
-      const job = await api("/api/jobs/zero-low-flow-5g/run", {
-        method: "POST",
-        body: formData,
-      });
-      state.jobId = job.id;
-      if (state.pollTimer) clearInterval(state.pollTimer);
-      state.pollTimer = setInterval(pollJob, 1000);
-      await pollJob();
-    } catch (err) {
-      setBusy(false);
-      appendLog([`启动失败: ${err.message}`]);
-      setProgress(0, "启动失败");
-    } finally {
-      $("zeroFlow5gFileInput").value = "";
+      const inputId = network === "5g" ? "zeroFlow5gFileInput" : "zeroFlowFileInput";
+      $(inputId).value = "";
     }
   }
 
@@ -442,7 +434,12 @@
       if (options.clearConflicts) {
         renderConflictTable(null);
       }
-      const job = await api(path, { method: "POST" });
+      const fetchOpts = { method: "POST" };
+      if (options.body) {
+        fetchOpts.headers = { "Content-Type": "application/json" };
+        fetchOpts.body = JSON.stringify(options.body);
+      }
+      const job = await api(path, fetchOpts);
       state.jobId = job.id;
       if (state.pollTimer) clearInterval(state.pollTimer);
       state.pollTimer = setInterval(pollJob, 1000);
@@ -1075,15 +1072,15 @@
 
     $("refreshStatusBtn").onclick = () => refreshStatus().catch((e) => alert(e.message));
     $("clearLogBtn").onclick = () => { $("logBox").textContent = ""; };
-    $("startCapacityBtn").onclick = () => startJob("/api/jobs/capacity");
-    $("startPhysicalBtn").onclick = () => startJob("/api/jobs/physical");
+    $("startCapacityBtn").onclick = () => startJob("/api/jobs/start/capacity");
+    $("startPhysicalBtn").onclick = () => startJob("/api/jobs/start/physical");
     if ($("startNrmSyncBtn")) {
-      $("startNrmSyncBtn").onclick = () => startJob("/api/jobs/nrm-sync");
+      $("startNrmSyncBtn").onclick = () => startJob("/api/jobs/start/nrm-sync");
     }
-    $("startLoweffBtn").onclick = () => startJob("/api/jobs/loweff");
-    $("startZeroFlowBtn").onclick = () => startJob("/api/jobs/zero-low-flow", { reloadZeroFlow: true });
+    $("startLoweffBtn").onclick = () => startJob("/api/jobs/start/loweff");
+    $("startZeroFlowBtn").onclick = () => startJob("/api/jobs/start/zero-low-flow", { reloadZeroFlow: true });
     if ($("startZeroFlow5gBtn")) {
-      $("startZeroFlow5gBtn").onclick = () => startJob("/api/jobs/zero-low-flow-5g", { reloadZeroFlow: true });
+      $("startZeroFlow5gBtn").onclick = () => startJob("/api/jobs/start/zero-low-flow", { body: { network: "5g" } });
     }
     $("zeroFlowFileInput").onchange = (e) => startZeroFlowWithFiles(e.target.files);
     if ($("zeroFlow5gFileInput")) {
@@ -1105,11 +1102,11 @@
     };
 
     $("checkConflictBtn").onclick = () =>
-      startJob("/api/jobs/physical/conflicts/check", { clearConflicts: true });
+      startJob("/api/jobs/start/conflicts/check", { clearConflicts: true });
 
     $("fixConflictBtn").onclick = async () => {
       if (!confirm("确认自动修正扇区冲突？")) return;
-      startJob("/api/jobs/physical/conflicts/fix", { clearConflicts: true });
+      startJob("/api/jobs/start/conflicts/fix", { clearConflicts: true });
     };
 
     $("uploadInput").onchange = async (e) => {
@@ -1293,18 +1290,18 @@
     setProgress(0, "就绪");
     try {
       const current = await api("/api/jobs/current");
-      if (current.job && (current.job.status === "running" || current.job.status === "pending")) {
-        state.jobId = current.job.id;
+      if (current && (current.status === "running" || current.status === "pending")) {
+        state.jobId = current.id;
         setBusy(true);
         state.pollTimer = setInterval(pollJob, 1000);
         await pollJob();
       } else if (
-        current.job &&
-        current.job.status === "success" &&
-        current.job.result_data &&
-        current.job.result_data.conflict_count !== undefined
+        current &&
+        current.status === "success" &&
+        current.result_data &&
+        current.result_data.conflict_count !== undefined
       ) {
-        renderConflictTable(current.job.result_data);
+        renderConflictTable(current.result_data);
       }
       await refreshStatus();
     } catch (err) {

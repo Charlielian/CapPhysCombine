@@ -48,28 +48,34 @@ def _load_config() -> dict[str, Any]:
 def get_server_port() -> int:
     """获取服务端口号，默认 4008。
 
-    优先级：环境变量 CAPPHYS_PORT > config.yaml > 默认 4008。
+    优先级：config.yaml > 环境变量 CAPPHYS_PORT > 默认 4008。
     """
+    config = _load_config()
+    port = config.get("server", {}).get("port")
+    if port is not None:
+        return int(port)
     env_port = os.environ.get("CAPPHYS_PORT")
     if env_port:
         try:
             return int(env_port)
         except ValueError:
             pass
-    config = _load_config()
-    return config.get("server", {}).get("port", DEFAULT_PORT)
+    return DEFAULT_PORT
 
 
 def get_server_host() -> str:
     """获取绑定地址：127.0.0.1 仅本机访问，0.0.0.0 局域网访问。
 
-    优先级：环境变量 CAPPHYS_HOST > config.yaml > 默认 127.0.0.1。
+    优先级：config.yaml > 环境变量 CAPPHYS_HOST > 默认 127.0.0.1。
     """
+    config = _load_config()
+    host = config.get("server", {}).get("host")
+    if host is not None:
+        return str(host)
     env_host = os.environ.get("CAPPHYS_HOST")
     if env_host:
         return env_host
-    config = _load_config()
-    return config.get("server", {}).get("host", DEFAULT_HOST)
+    return DEFAULT_HOST
 
 
 def is_lan_accessible() -> bool:

@@ -1,6 +1,6 @@
 # syntax=docker/dockerfile:1
 # CapPhysCombine 容器镜像
-# 提供 FastAPI Web 服务（端口 4008），支持容量表 / 物理表 / 低效小区 / 零低流量等任务
+# 提供 FastAPI Web 服务，端口由 config.yaml 决定（默认 4008）
 
 FROM python:3.11-slim AS base
 
@@ -35,11 +35,11 @@ COPY CapPhysCombine.py ./
 # 运行期目录（由 compose 挂载卷覆盖）
 RUN mkdir -p /app/data /app/logs /app/.cache/parquet
 
-EXPOSE 4008
+EXPOSE 9008
 
 # 健康检查（容器自带 curl 较精简，用 python 标准库探测）
 HEALTHCHECK --interval=30s --timeout=5s --start-period=20s --retries=3 \
-    CMD python -c "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:4008/api/health', timeout=3).status==200 else 1)" || exit 1
+    CMD python -c "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:9008/api/health', timeout=3).status==200 else 1)" || exit 1
 
 # 默认以 Web 模式启动；可被 CMD 覆盖以运行 CLI 子命令
 CMD ["python", "CapPhysCombine.py", "serve"]

@@ -437,7 +437,6 @@ def build_5g_table(conn: duckdb.DuckDBPyConnection, logger: GuiLogger | None = N
         "工作日自忙时利用率", "工作日日均流量", "工作日自忙时RRC连接最大数",
         "工作日零流量天数", "周末零流量天数", "最大3天流量均值",
         "周末自忙时利用率", "周末日均流量", "周末自忙时RRC连接最大数",
-        "工作日零流量天数", "周末零流量天数", "最大3天流量均值",
         "自忙时上行PRB平均利用率", "自忙时下行PRB平均利用率", "自忙时PDCCH信道CCE占用率",
         "自忙时有效RRC连接最大数", "自忙时RRC连接最大数", "自忙时有效RRC连接平均数",
         "自忙时总流量", "自忙时上行流量", "自忙时下行流量",
@@ -702,7 +701,7 @@ def build_45g_table(table_5g: pd.DataFrame, table_4g: pd.DataFrame) -> pd.DataFr
     merged_5g = merged_5g.rename(columns={"NCGI": "CGI/NCGI", "VoNR语音话务量": "语音话务量Erl （VOLTE/VoNR）"})
     merged_4g = merged_4g.rename(columns={"CGI": "CGI/NCGI"})
 
-    all_columns = ["网络制式"] + [column for column in merged_5g.columns if column != "网络制式"]
+    all_columns = ["网络制式"] + list(dict.fromkeys(column for column in merged_5g.columns if column != "网络制式"))
     for column in all_columns:
         if column not in merged_5g.columns:
             merged_5g[column] = pd.NA

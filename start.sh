@@ -20,7 +20,7 @@ fi
 
 echo "Starting CapPhysCombine..."
 cd "$SCRIPT_DIR"
-nohup python CapPhysCombine.py serve >> "$LOG_FILE" 2>&1 &
+nohup python3 CapPhysCombine.py serve >> "$LOG_FILE" 2>&1 &
 PID=$!
 echo "$PID" > "$PID_FILE"
 echo "Server started (PID: $PID)"
