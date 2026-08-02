@@ -90,7 +90,7 @@ jobs:
             - Web UI 界面
 
             ### Web UI 使用
-            运行 `CapPhysCombine.exe --serve` 启动 Web 服务，访问 http://localhost:4008
+            运行 `CapPhysCombine.exe serve` 启动 Web 服务，访问 http://localhost:9008
           files: |
             dist/CapPhysCombine.zip
           draft: false

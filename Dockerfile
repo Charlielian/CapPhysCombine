@@ -1,6 +1,6 @@
 # syntax=docker/dockerfile:1
 # CapPhysCombine 容器镜像
-# 提供 FastAPI Web 服务，端口由 config.yaml 决定（默认 4008）
+# 提供 FastAPI Web 服务，端口由 config.yaml 决定（默认 9008）
 
 FROM python:3.11-slim AS base
 

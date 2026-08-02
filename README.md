@@ -2,7 +2,7 @@
 
 容量表合成 / 物理表汇总 / 低效小区 / 零低流量 / 共站同覆盖管理工具。
 
-技术栈：**FastAPI + 静态页面**（端口 **4008**）。业务逻辑在 `app/pipelines/`（按功能分模块），统一 CLI 为 `CapPhysCombine.py`。
+技术栈：**FastAPI + 静态页面**（端口 **9008**）。业务逻辑在 `app/pipelines/`（按功能分模块），统一 CLI 为 `CapPhysCombine.py`。
 
 ## 功能 ↔ 入口对照
 
@@ -27,12 +27,12 @@ pip install -r requirements.txt
 ## Web 启动（推荐）
 
 ```bash
-uvicorn app.main:app --host 0.0.0.0 --port 4008
+uvicorn app.main:app --host 0.0.0.0 --port 9008
 # 或
 python CapPhysCombine.py serve
 ```
 
-浏览器打开：<http://localhost:4008/>
+浏览器打开：<http://localhost:9008/>
 
 将源数据 Excel 放入项目根目录下的 `data/`，也可在页面上直接上传。
 
