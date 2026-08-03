@@ -51,7 +51,8 @@ def get_server_port() -> int:
     优先级：config.yaml > 环境变量 CAPPHYS_PORT > 默认 4008。
     """
     config = _load_config()
-    port = config.get("server", {}).get("port")
+    server = config.get("server") or {}
+    port = server.get("port")
     if port is not None:
         return int(port)
     env_port = os.environ.get("CAPPHYS_PORT")
@@ -69,7 +70,8 @@ def get_server_host() -> str:
     优先级：config.yaml > 环境变量 CAPPHYS_HOST > 默认 127.0.0.1。
     """
     config = _load_config()
-    host = config.get("server", {}).get("host")
+    server = config.get("server") or {}
+    host = server.get("host")
     if host is not None:
         return str(host)
     env_host = os.environ.get("CAPPHYS_HOST")

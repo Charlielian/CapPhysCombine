@@ -296,7 +296,7 @@ def validate_excel(
 
             wb = CalamineWorkbook.from_path(str(path))
             ws = wb.get_sheet_by_index(0)
-            rows_iter = ws.iter_rows(values_only=True)
+            rows_iter = ws.iter_rows()
             headers = next(rows_iter, None) or ()
         else:
             from openpyxl import load_workbook
@@ -314,13 +314,7 @@ def validate_excel(
             label=schema.label,
             file=str(path),
             ok=False,
-            missing_required=list(schema.required),
-        ).__class__(
-            schema_key=schema.key,
-            label=schema.label,
-            file=str(path),
-            ok=False,
-            missing_required=[f"读取失败: {exc}"],
+            missing_required=[f"读取失败: {exc_to_return}"],
         )
 
     available = [str(h) if h is not None else "" for h in headers]

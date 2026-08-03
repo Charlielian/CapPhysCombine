@@ -777,12 +777,19 @@ class CogCoverageManager:
             self.conn.execute("DELETE FROM 共站同覆盖小区表")
         
         # 批量插入（使用UPSERT处理重复）
+        # 显式列出全部目标列，包含 is_active（带默认值），避免与表实际列数/列序耦合。
+        # 替换时保留已有记录的激活状态：已存在则沿用，新记录默认 TRUE。
         self.conn.register("df_import", df)
         self.conn.execute("""
-            INSERT OR REPLACE INTO 共站同覆盖小区表 
-            SELECT CGI, 共站同覆盖名, 物理站名, 小区名称, 使用频段, 是否覆盖层, 
-                   小区所属区域, 路测网格, 经度, 纬度, sectionid,
-                   CURRENT_TIMESTAMP, CURRENT_TIMESTAMP
+            INSERT OR REPLACE INTO 共站同覆盖小区表 (
+                CGI, 共站同覆盖名, 物理站名, 小区名称, 使用频段,
+                是否覆盖层, 小区所属区域, 路测网格, 经度, 纬度, sectionid,
+                创建时间, 更新时间, is_active
+            )
+            SELECT CGI, 共站同覆盖名, 物理站名, 小区名称, 使用频段,
+                   是否覆盖层, 小区所属区域, 路测网格, 经度, 纬度, sectionid,
+                   CURRENT_TIMESTAMP, CURRENT_TIMESTAMP,
+                   COALESCE((SELECT t.is_active FROM 共站同覆盖小区表 t WHERE t.CGI = df_import.CGI), TRUE)
             FROM df_import
         """)
         self.conn.unregister("df_import")
@@ -955,43 +962,10 @@ class SourceFileError(RuntimeError):
     pass
 
 
-def setup_logging() -> logging.Logger:
-    """配置日志系统，每天一个日志文件，自动清理超过7天的日志"""
-    LOG_DIR.mkdir(parents=True, exist_ok=True)
-    
-    # 清理过期日志
-    cleanup_old_logs()
-    
-    # 创建日志记录器
-    logger = logging.getLogger("CapPhysCombine")
-    logger.setLevel(logging.DEBUG)
-    
-    # 避免重复添加处理器
-    if logger.handlers:
-        return logger
-    
-    # 格式化
-    formatter = logging.Formatter(
-        "%(asctime)s [%(levelname)s] %(message)s",
-        datefmt="%Y-%m-%d %H:%M:%S"
-    )
-    
-    # 文件处理器 - 每天一个文件
-    today = datetime.now().strftime("%Y%m%d")
-    log_file = LOG_DIR / f"app_{today}.log"
-    file_handler = logging.FileHandler(log_file, encoding="utf-8")
-    file_handler.setLevel(logging.DEBUG)
-    file_handler.setFormatter(formatter)
-    
-    # 控制台处理器
-    console_handler = logging.StreamHandler()
-    console_handler.setLevel(logging.INFO)
-    console_handler.setFormatter(formatter)
-    
-    logger.addHandler(file_handler)
-    logger.addHandler(console_handler)
-    
-    return logger
+def setup_logging():
+    """配置日志系统 — 委托给 logging_util（支持 loguru + 标准库降级）"""
+    from app.pipelines.logging_util import setup_logging as _setup
+    return _setup()
 
 
 def cleanup_old_logs() -> None:
@@ -2776,16 +2750,18 @@ def run_physical_table_sector_fix(
     input_path: str,
     output_dir: str | None = None,
     auto_fix: bool = True,
+    progress_callback: ProgressCallback | None = None,
     log_callback: LogCallback | None = None,
 ) -> dict:
     """检测并修正物理表扇区冲突
-    
+
     Args:
         input_path: 物理表Excel文件路径
         output_dir: 输出目录，默认为输入文件所在目录
         auto_fix: 是否自动修正冲突
+        progress_callback: 进度回调函数
         log_callback: 日志回调函数
-        
+
     Returns:
         包含 fixed_df, conflict_df, fix_df 的字典
     """

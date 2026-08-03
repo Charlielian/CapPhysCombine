@@ -18,7 +18,8 @@ from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.responses import Response
 
 from app.config import STATIC_DIR, get_server_host, get_server_port
-from app.pipelines.core import init_unified_database, setup_logging
+from app.pipelines.core import init_unified_database
+from app.pipelines.logging_util import setup_logging
 from app.routers import capacity_results, cog, data, jobs_api, physical_extra, physical_query
 from app.schemas import AppError, ErrorResponse, ErrorDetail
 

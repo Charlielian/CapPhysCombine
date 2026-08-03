@@ -8,7 +8,9 @@ FROM python:3.11-slim AS base
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
     PIP_NO_CACHE_DIR=1 \
-    PIP_DISABLE_PIP_VERSION_CHECK=1
+    PIP_DISABLE_PIP_VERSION_CHECK=1 \
+    CAPPHYS_HOST=0.0.0.0 \
+    CAPPHYS_PORT=9008
 
 # geopandas / shapely / pyproj 运行期需要的系统库
 # libgeos / libproj / libgdal 供空间运算；libexpat1 供 openpyxl 间接依赖

@@ -205,7 +205,8 @@ class CogCoverageManager:
             result = self.conn.execute(
                 f"DELETE FROM 共站同覆盖小区表 WHERE CGI IN ({placeholders})", cgis
             )
-            return result.fetchone()[0] if result.fetchone() else 0
+            row = result.fetchone()
+            return row[0] if row else 0
         except Exception as e:
             print(f"批量删除失败: {e}")
             return 0
@@ -262,12 +263,19 @@ class CogCoverageManager:
             self.conn.execute("DELETE FROM 共站同覆盖小区表")
 
         # 批量插入（使用UPSERT处理重复）
+        # 显式列出全部目标列，包含 is_active（带默认值），避免与表实际列数/列序耦合。
+        # 替换时保留已有记录的激活状态：已存在则沿用，新记录默认 TRUE。
         self.conn.register("df_import", df)
         self.conn.execute("""
-            INSERT OR REPLACE INTO 共站同覆盖小区表 
-            SELECT CGI, 共站同覆盖名, 物理站名, 小区名称, 使用频段, 是否覆盖层, 
-                   小区所属区域, 路测网格, 经度, 纬度, sectionid,
-                   CURRENT_TIMESTAMP, CURRENT_TIMESTAMP
+            INSERT OR REPLACE INTO 共站同覆盖小区表 (
+                CGI, 共站同覆盖名, 物理站名, 小区名称, 使用频段,
+                是否覆盖层, 小区所属区域, 路测网格, 经度, 纬度, sectionid,
+                创建时间, 更新时间, is_active
+            )
+            SELECT CGI, 共站同覆盖名, 物理站名, 小区名称, 使用频段,
+                   是否覆盖层, 小区所属区域, 路测网格, 经度, 纬度, sectionid,
+                   CURRENT_TIMESTAMP, CURRENT_TIMESTAMP,
+                   COALESCE((SELECT t.is_active FROM 共站同覆盖小区表 t WHERE t.CGI = df_import.CGI), TRUE)
             FROM df_import
         """)
         self.conn.unregister("df_import")

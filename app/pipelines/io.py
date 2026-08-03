@@ -238,7 +238,8 @@ def excel_to_db(
             if first_sheet is None:
                 return 0
             ws = wb.get_sheet_by_name(first_sheet)
-            rows_iter = ws.iter_rows(values_only=True)
+            # calamine 的 iter_rows 直接返回单元格值，不接受 values_only 参数
+            rows_iter = ws.iter_rows()
         except Exception:
             # calamine 失败，降级到 openpyxl
             from openpyxl import load_workbook

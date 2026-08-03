@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import os
 import tempfile
 from pathlib import Path
 from typing import Any
@@ -101,8 +102,10 @@ async def import_cog(file: UploadFile = File(...), replace: bool = False):
         raise HTTPException(status_code=400, detail="未选择文件")
     suffix = Path(file.filename).suffix or ".xlsx"
     content = await file.read()
-    tmp_path = Path(tempfile.NamedTemporaryFile(delete=False, suffix=suffix).name)
-    loop = asyncio.get_event_loop()
+    fd, path_str = tempfile.mkstemp(suffix=suffix)
+    os.close(fd)  # 立即关闭文件描述符，仅保留路径
+    tmp_path = Path(path_str)
+    loop = asyncio.get_running_loop()
     # 写临时文件放到工作线程
     await loop.run_in_executor(None, _write_bytes_sync, tmp_path, content)
     try:

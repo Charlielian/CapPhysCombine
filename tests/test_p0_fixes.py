@@ -108,7 +108,6 @@ class PhysicalPackageImportTests(unittest.TestCase):
             "read_common_coverage",
             "build_cc_lookup",
             "calc_nr_freq",
-            "load_geojson_with_index",
             "get_grid_by_coords_batch",
             "union_find_cluster",
             "cluster_by_distance",

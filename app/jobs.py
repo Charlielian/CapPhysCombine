@@ -644,8 +644,8 @@ class JobManager:
             path = run_zero_low_flow_pipeline(
                 progress_callback=on_progress,
                 log_callback=on_log,
-                file_paths=file_paths,
-                network=network,
+                data_dir=file_paths,
+                net_type=network,
             )
             job.result_files = [Path(path).name]
 

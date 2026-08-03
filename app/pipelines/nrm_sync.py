@@ -22,7 +22,8 @@ from app.pipelines.common import (
     SourceFileError,
     read_excel,
 )
-from app.pipelines.io import get_excel_engine
+from app.pipelines.cog_db import init_unified_database
+from app.pipelines.io import get_excel_engine, get_unified_db_connection
 
 _META_RE = re.compile(
     r"(long:|double:|stringArray|该参数|默认值|小区复位|单位:|MHz|\[0\.\.|--)",
@@ -169,7 +170,8 @@ def read_nrm_sheet(path: Path, sheet: str, cols: list[str]) -> pd.DataFrame:
             return pd.DataFrame(columns=cols)
 
         ws = wb.get_sheet_by_name(sheet)
-        it = ws.iter_rows(values_only=True) if eng == "calamine" else ws.iter_rows(values_only=True)
+        # calamine 的 iter_rows 直接返回单元格值；openpyxl 需 values_only=True
+        it = ws.iter_rows() if eng == "calamine" else ws.iter_rows(values_only=True)
         try:
             header = next(it)
         except StopIteration:

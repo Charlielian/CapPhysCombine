@@ -65,8 +65,14 @@ def load_cog_coverage_mapping(
 
             logger.log(f"从统一数据库加载共站同覆盖映射表（{count} 条记录）")
 
-            # 获取所有数据
+            # 获取所有数据，过滤掉已停用的小区
             df = mgr.get_all()
+            if "is_active" in df.columns:
+                before = len(df)
+                df = df[df["is_active"] != False].reset_index(drop=True)  # noqa: E712
+                deactivated = before - len(df)
+                if deactivated:
+                    logger.log(f"已过滤 {deactivated} 条停用小区记录")
             if df.empty:
                 return pd.DataFrame(columns=["CGI", "共站同覆盖名"])
 

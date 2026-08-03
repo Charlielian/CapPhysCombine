@@ -19,13 +19,21 @@ from app.pipelines.zero_low_flow import latest_zero_low_flow_output
 router = APIRouter(prefix="/api", tags=["physical"])
 
 
+def _resolve_excel_path(path: str | None, default_name: str = "物理表汇总结果.xlsx") -> Path:
+    """将用户提供的路径解析为 BASE_DIR 内的安全绝对路径，防止路径穿越。"""
+    excel = Path(path).resolve() if path else (BASE_DIR / default_name).resolve()
+    if not str(excel).startswith(str(BASE_DIR.resolve())):
+        raise HTTPException(status_code=403, detail="路径不允许超出工作目录")
+    return excel
+
+
 def _df_records(df: pd.DataFrame, limit: int = 500) -> list[dict]:
     return df_records(df, limit=limit)
 
 
 @router.post("/physical/conflicts/check")
 def check_conflicts(path: str | None = None):
-    excel = Path(path) if path else BASE_DIR / "物理表汇总结果.xlsx"
+    excel = _resolve_excel_path(path)
     if not excel.is_file():
         raise HTTPException(status_code=404, detail=f"文件不存在: {excel.name}")
     try:
@@ -42,7 +50,7 @@ def check_conflicts(path: str | None = None):
 
 @router.post("/physical/conflicts/fix")
 def fix_conflicts(path: str | None = None):
-    excel = Path(path) if path else BASE_DIR / "物理表汇总结果.xlsx"
+    excel = _resolve_excel_path(path)
     if not excel.is_file():
         raise HTTPException(status_code=404, detail=f"文件不存在: {excel.name}")
     try:
@@ -101,7 +109,7 @@ def loweff_view(
     if keyword:
         mask = pd.Series(False, index=df.index)
         for col in df.columns:
-            mask = mask | df[col].astype(str).str.contains(keyword, case=False, na=False)
+            mask = mask | df[col].astype(str).str.contains(keyword, case=False, na=False, regex=False)
         df = df[mask]
 
     summary: dict = {}

@@ -30,6 +30,8 @@ except ImportError:  # pragma: no cover
     _loguru_logger = None  # type: ignore
     _HAS_LOGURU = False
 
+_configured = False  # 防止重复配置
+
 
 class SourceFileError(RuntimeError):
     """源文件缺失或格式不符。"""
@@ -145,9 +147,12 @@ def setup_logging() -> Any:
 
     返回 loguru logger 或标准库 logger（loguru 不可用时）。
     """
+    global _configured
     if _HAS_LOGURU:
         _configure_loguru()
+        _configured = True
         return _loguru_logger
+    _configured = True
     return _configure_stdlib()
 
 
@@ -173,8 +178,7 @@ def cleanup_old_logs() -> None:
 def get_logger() -> Any:
     """获取已配置的 logger（loguru 或标准库）。"""
     if _HAS_LOGURU:
-        # loguru 全局单例，无需 handlers 检查；首次调用时自动配置
-        if not _loguru_logger._core.handlers:
+        if not _configured:
             setup_logging()
         return _loguru_logger
     logger = logging.getLogger("CapPhysCombine")
