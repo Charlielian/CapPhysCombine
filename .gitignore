@@ -44,3 +44,6 @@ rebuild_three_periods.py
 
 # Runtime
 .server.pid
+
+# Tools
+.workbuddy/

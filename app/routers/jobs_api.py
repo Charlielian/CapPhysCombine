@@ -11,10 +11,11 @@ from typing import Any
 from fastapi import APIRouter, Depends, Query
 from pydantic import BaseModel
 
-from app.jobs import JobManager, get_asset_graph, job_manager as _default_manager
+from app.jobs import JobManager
+from app.jobs import job_manager as _default_manager
+from app.pipelines.core import discover_4g_week_files
 from app.schemas import (
     AppError,
-    JobDetail,
     SuccessResponse,
 )
 
@@ -45,6 +46,10 @@ class ZeroLowFlowRequest(BaseModel):
     network: str = "4g"
 
 
+class MultiWeekLoweffRequest(BaseModel):
+    week_file_paths: list[str]
+
+
 # ---------------------------------------------------------------------------
 # Asset dependency graph
 # ---------------------------------------------------------------------------
@@ -56,7 +61,6 @@ def asset_graph(
 ) -> dict[str, Any]:
     """返回 pipeline 依赖图（节点 + 边 + 最近运行状态）。"""
     status = mgr.get_asset_graph_status()
-    raw = get_asset_graph()
     # Merge edges from ASSET_DEPS
     edges: list[dict[str, str]] = []
     for item in status:
@@ -168,4 +172,29 @@ def start_zero_low_flow(
         mgr,
         kind,
         lambda: mgr.start_zero_low_flow(file_paths=file_paths, network=network),
+    )
+
+
+# ---------------------------------------------------------------------------
+# Multi-week 4G evaluation
+# ---------------------------------------------------------------------------
+
+
+@router.get("/multi-week/weeks")
+def list_week_files() -> dict[str, Any]:
+    """扫描 data/ 及子目录，返回所有可用的 重要场景-周*.xlsx 文件。"""
+    weeks = discover_4g_week_files()
+    return SuccessResponse(data=weeks).model_dump()
+
+
+@router.post("/start/multi-week-loweff")
+def start_multi_week_loweff(
+    body: MultiWeekLoweffRequest,
+    mgr: JobManager = Depends(get_job_manager),
+) -> dict[str, Any]:
+    """启动多周期4G全量评估任务。"""
+    return _start(
+        mgr,
+        "multi_week_loweff",
+        lambda: mgr.start_multi_week_loweff(week_file_paths=body.week_file_paths),
     )

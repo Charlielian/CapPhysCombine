@@ -81,7 +81,7 @@ def fix_conflicts(path: str | None = None):
 
 @router.get("/loweff/view")
 def loweff_view(
-    sheet: str = Query("5g", pattern="^(summary|5g|4g|4g_all)$"),
+    sheet: str = Query("5g", pattern="^(summary|5g|4g|4g_all|station_band)$"),
     keyword: str = Query(""),
     low_type: str = Query(""),
     band: str = Query(""),
@@ -95,6 +95,7 @@ def loweff_view(
         "5g": "5G低效明细",
         "4g": "4G低效明细",
         "4g_all": "全量4G小区评估",
+        "station_band": "物理站+频段评估",
     }
     try:
         df = read_excel(LOWEFF_OUTPUT_PATH, sheet_name=sheet_map[sheet])
@@ -106,6 +107,8 @@ def loweff_view(
         df = df[df["低效类型"].astype(str) == low_type]
     if band and "band" in df.columns:
         df = df[df["band"].astype(str) == band]
+    elif band and "频段" in df.columns:
+        df = df[df["频段"].astype(str) == band]
     if keyword:
         mask = pd.Series(False, index=df.index)
         for col in df.columns:

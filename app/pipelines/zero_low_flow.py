@@ -361,6 +361,7 @@ def write_report(
     ws3.column_dimensions[get_column_letter(problem_col_idx)].width = 40
 
     wb.save(output_file)
+    wb.close()
 
 
 # ---------- 4G 管线 ----------
@@ -583,7 +584,16 @@ def run_5g_zero_low_flow_pipeline(
     pivot["风险等级"] = pivot.apply(
         lambda r: risk_level(r["连续零流量天数"], r["连续低流量天数"]), axis=1
     )
-    pivot["问题"] = ""
+
+    if problem_df is not None:
+        # 5G 使用 NCGI 列匹配，4G 使用 CGI
+        pivot = pivot.merge(problem_df, left_on="NCGI", right_on="CGI", how="left")
+        pivot["问题"] = pivot["问题"].fillna("")
+        if "CGI_y" in pivot.columns:
+            pivot.drop(columns=["CGI_y"], inplace=True)
+            pivot.rename(columns={"CGI_x": "CGI"}, inplace=True)
+    else:
+        pivot["问题"] = ""
 
     total = len(pivot)
     zero_today = int((pivot["当日状态"] == "零流量").sum())

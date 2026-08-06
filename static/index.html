@@ -44,6 +44,9 @@
       <button class="tab" data-tab="loweff" data-tooltip="低效小区" type="button">
         <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="22 17 13.5 8.5 8.5 13.5 2 7"/><polyline points="16 17 22 17 22 11"/></svg>
       </button>
+      <button class="tab" data-tab="multiweek" data-tooltip="多周期评估" type="button">
+        <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="18" rx="2" ry="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/><path d="M8 14h.01M12 14h.01M16 14h.01M8 18h.01M12 18h.01"/></svg>
+      </button>
       <button class="tab" data-tab="zeroflow" data-tooltip="零低流量风险" type="button">
         <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
       </button>
@@ -65,7 +68,7 @@
           <label class="btn secondary upload-btn">
             <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
             上传到 data/
-            <input id="uploadInput" type="file" multiple accept=".xlsx,.xls,.csv" hidden />
+            <input id="uploadInput" type="file" multiple accept=".xlsx,.xls,.csv" class="sr-only-input" />
           </label>
           <button id="refreshStatusBtn" class="btn secondary" type="button">
             <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="23 4 23 10 17 10"/><polyline points="1 20 1 14 7 14"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/></svg>
@@ -264,12 +267,12 @@
               <label class="btn secondary upload-btn">
                 <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
                 导入文件并分析
-                <input id="zeroFlowFileInput" type="file" multiple accept=".xlsx,.xls" hidden />
+                <input id="zeroFlowFileInput" type="file" multiple accept=".xlsx,.xls" class="sr-only-input" />
               </label>
               <label class="btn secondary upload-btn" id="zeroFlow5gUploadLabel">
                 <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
                 导入5G文件并分析
-                <input id="zeroFlow5gFileInput" type="file" multiple accept=".xlsx,.xls" hidden />
+                <input id="zeroFlow5gFileInput" type="file" multiple accept=".xlsx,.xls" class="sr-only-input" />
               </label>
               <button id="loadZeroFlowBtn" class="btn secondary" type="button">加载结果</button>
             </div>
@@ -305,6 +308,26 @@
             </div>
           </section>
 
+          <!-- Tab: 多周期4G全量评估 -->
+          <section id="panel-multiweek" class="tab-panel card">
+            <h2 class="card-title">多周期4G全量评估</h2>
+            <p class="card-desc">选择多个周期的「重要场景-周」数据，逐一执行4G全量低效评估，最后输出跨周期汇总（所有周期都符合减容条件的小区判定为"能减容"）</p>
+            <div class="card-actions">
+              <label class="btn secondary upload-btn">
+                <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
+                导入周文件
+                <input id="multiweekFileInput" type="file" multiple accept=".xlsx,.xls" class="sr-only-input" />
+              </label>
+              <button id="multiweekRefreshBtn" class="btn secondary" type="button">扫描可用周文件</button>
+              <button id="multiweekStartBtn" class="btn primary" type="button" disabled>开始多周期评估</button>
+              <a id="multiweekDownloadLink" class="btn secondary hidden" href="/api/data/download/多周期4G全量评估.xlsx">下载 Excel</a>
+            </div>
+            <div id="multiweekWeekList" class="multiweek-week-list">
+              <p class="muted" style="font-size:13px">点击「扫描可用周文件」查看可评估的周期数据</p>
+            </div>
+            <div id="multiweekKpi" class="kpi-grid" style="margin-top:12px"></div>
+          </section>
+
           <!-- Tab 4: 共站同覆盖 -->
           <section id="panel-cog" class="tab-panel card">
             <h2 class="card-title">共站同覆盖表管理</h2>
@@ -314,7 +337,7 @@
               <button id="cogReloadBtn" class="btn secondary" type="button">刷新</button>
               <label class="btn secondary upload-btn">
                 导入 Excel
-                <input id="cogImportInput" type="file" accept=".xlsx,.xls" hidden />
+                <input id="cogImportInput" type="file" accept=".xlsx,.xls" class="sr-only-input" />
               </label>
               <a class="btn secondary" href="/api/cog/export/excel">导出 Excel</a>
               <button id="cogAddBtn" class="btn primary" type="button">新增</button>

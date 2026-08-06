@@ -21,7 +21,7 @@ from app.config import STATIC_DIR, get_server_host, get_server_port
 from app.pipelines.core import init_unified_database
 from app.pipelines.logging_util import setup_logging
 from app.routers import capacity_results, cog, data, jobs_api, physical_extra, physical_query
-from app.schemas import AppError, ErrorResponse, ErrorDetail
+from app.schemas import AppError, ErrorDetail, ErrorResponse
 
 log = logging.getLogger("CapPhysCombine")
 
@@ -62,8 +62,9 @@ class AccessLogMiddleware(BaseHTTPMiddleware):
 
 @asynccontextmanager
 async def lifespan(_app: FastAPI):
-    from app.pipelines.core import LOG_DIR
     from datetime import datetime
+
+    from app.pipelines.core import LOG_DIR
 
     logger = setup_logging()
     logger.info(

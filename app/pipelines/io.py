@@ -20,6 +20,7 @@ import logging
 from pathlib import Path
 
 import duckdb
+import numpy as np
 import pandas as pd
 
 from app.pipelines.paths import DB_PATH, PARQUET_CACHE_DIR, UNIFIED_DB_PATH
@@ -269,6 +270,8 @@ def excel_to_db(
     cache_chunks: list[pd.DataFrame] = []
 
     for row in rows_iter:
+        # 空字符串 → None，避免 DuckDB 将其推断为 VARCHAR 导致类型错误
+        row = tuple(None if isinstance(v, str) and v == "" else v for v in row)
         chunk.append(row)
         if len(chunk) >= chunk_size:
             df_chunk = pd.DataFrame(chunk, columns=headers)
@@ -328,6 +331,8 @@ def small_excel_to_db(
 
     df = _read_excel_flat(path)
     df.columns = [str(c) for c in df.columns]
+    # 空字符串 → NaN，避免 DuckDB 类型推断为 VARCHAR
+    df = df.replace("", np.nan)
 
     tmp_name = f"_tmp_{table_name}"
     conn.register(tmp_name, df)
@@ -354,13 +359,14 @@ def db_to_dataframe(query: str, conn: duckdb.DuckDBPyConnection) -> pd.DataFrame
 
 def table_exists(conn: duckdb.DuckDBPyConnection, table_name: str) -> bool:
     result = conn.execute(
-        f"SELECT 1 FROM information_schema.tables WHERE table_name = '{table_name}'"
+        "SELECT 1 FROM information_schema.tables WHERE table_name = ?",
+        [table_name],
     ).fetchone()
     return result is not None
 
 
 def get_table_columns(conn: duckdb.DuckDBPyConnection, table_name: str) -> list[str]:
-    result = conn.execute(f'DESCRIBE "{table_name}"').fetchdf()
+    result = conn.execute(f"DESCRIBE {duckdb.quote_ident(table_name)}").fetchdf()
     return list(result["column_name"])
 
 

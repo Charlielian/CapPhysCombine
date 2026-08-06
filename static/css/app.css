@@ -903,3 +903,19 @@ td[data-loweff-type="低效益小区"] {
 
 .theme-menu li.active { color: var(--primary); }
 .theme-menu li.active .tm-check { opacity: 1; }
+
+/* ===== 通用工具类 ===== */
+.hidden { display: none !important; }
+
+/* Screen-reader-only — visually hidden but interactive (for file inputs inside labels) */
+.sr-only-input {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}

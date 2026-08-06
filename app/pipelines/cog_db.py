@@ -41,8 +41,10 @@ def _cog_coverage_table_exists(conn: duckdb.DuckDBPyConnection) -> bool:
 
 
 def init_unified_database(conn: duckdb.DuckDBPyConnection | None = None) -> duckdb.DuckDBPyConnection:
-    """初始化统一数据库表结构（包含持久化的共站同覆盖表）"""
-    close_conn = conn is None
+    """初始化统一数据库表结构（包含持久化的共站同覆盖表）。
+
+    当传入 conn 时复用已有连接；未传入时创建新连接并保留打开状态返回给调用方。
+    """
     if conn is None:
         conn = get_unified_db_connection()
 
@@ -89,9 +91,6 @@ def init_unified_database(conn: duckdb.DuckDBPyConnection | None = None) -> duck
 
     if not _cog_coverage_table_exists(conn):
         raise RuntimeError(f"统一数据库初始化失败，表未创建: {UNIFIED_DB_PATH}")
-
-    if close_conn:
-        conn.close()
 
     return conn
 
@@ -197,16 +196,17 @@ class CogCoverageManager:
             return False
 
     def delete_many(self, cgis: list[str]) -> int:
-        """批量删除"""
+        """批量删除，返回实际删除的行数"""
         if not cgis:
             return 0
         try:
+            before = self.get_count()
             placeholders = ",".join(["?"] * len(cgis))
-            result = self.conn.execute(
+            self.conn.execute(
                 f"DELETE FROM 共站同覆盖小区表 WHERE CGI IN ({placeholders})", cgis
             )
-            row = result.fetchone()
-            return row[0] if row else 0
+            after = self.get_count()
+            return before - after
         except Exception as e:
             print(f"批量删除失败: {e}")
             return 0
@@ -260,25 +260,79 @@ class CogCoverageManager:
 
         # 清空或追加
         if replace:
-            self.conn.execute("DELETE FROM 共站同覆盖小区表")
+            # 事务包裹：先备份 is_active，DELETE 后 INSERT 时恢复
+            self.conn.execute("BEGIN TRANSACTION")
+            try:
+                # 备份当前 is_active 状态
+                backup_df = self.conn.execute(
+                    "SELECT CGI, is_active FROM 共站同覆盖小区表"
+                ).fetchdf()
+                active_map = {}
+                if not backup_df.empty:
+                    active_map = dict(zip(backup_df["CGI"], backup_df["is_active"]))
 
-        # 批量插入（使用UPSERT处理重复）
-        # 显式列出全部目标列，包含 is_active（带默认值），避免与表实际列数/列序耦合。
-        # 替换时保留已有记录的激活状态：已存在则沿用，新记录默认 TRUE。
-        self.conn.register("df_import", df)
-        self.conn.execute("""
-            INSERT OR REPLACE INTO 共站同覆盖小区表 (
-                CGI, 共站同覆盖名, 物理站名, 小区名称, 使用频段,
-                是否覆盖层, 小区所属区域, 路测网格, 经度, 纬度, sectionid,
-                创建时间, 更新时间, is_active
-            )
-            SELECT CGI, 共站同覆盖名, 物理站名, 小区名称, 使用频段,
-                   是否覆盖层, 小区所属区域, 路测网格, 经度, 纬度, sectionid,
-                   CURRENT_TIMESTAMP, CURRENT_TIMESTAMP,
-                   COALESCE((SELECT t.is_active FROM 共站同覆盖小区表 t WHERE t.CGI = df_import.CGI), TRUE)
-            FROM df_import
-        """)
-        self.conn.unregister("df_import")
+                self.conn.execute("DELETE FROM 共站同覆盖小区表")
+                self.conn.register("df_import", df)
+
+                if active_map:
+                    import pandas as _pd
+                    backup_rows = [{"CGI": k, "old_active": v} for k, v in active_map.items()]
+                    bak_pd = _pd.DataFrame(backup_rows)
+                    self.conn.register("_bak_active", bak_pd)
+                    self.conn.execute("""
+                        INSERT OR REPLACE INTO 共站同覆盖小区表 (
+                            CGI, 共站同覆盖名, 物理站名, 小区名称, 使用频段,
+                            是否覆盖层, 小区所属区域, 路测网格, 经度, 纬度, sectionid,
+                            创建时间, 更新时间, is_active
+                        )
+                        SELECT di.CGI, di.共站同覆盖名, di.物理站名, di.小区名称, di.使用频段,
+                               di.是否覆盖层, di.小区所属区域, di.路测网格, di.经度, di.纬度, di.sectionid,
+                               CURRENT_TIMESTAMP, CURRENT_TIMESTAMP,
+                               COALESCE(ba.old_active, TRUE)
+                        FROM df_import di
+                        LEFT JOIN _bak_active ba ON di.CGI = ba.CGI
+                    """)
+                    self.conn.unregister("_bak_active")
+                else:
+                    self.conn.execute("""
+                        INSERT OR REPLACE INTO 共站同覆盖小区表 (
+                            CGI, 共站同覆盖名, 物理站名, 小区名称, 使用频段,
+                            是否覆盖层, 小区所属区域, 路测网格, 经度, 纬度, sectionid,
+                            创建时间, 更新时间, is_active
+                        )
+                        SELECT CGI, 共站同覆盖名, 物理站名, 小区名称, 使用频段,
+                               是否覆盖层, 小区所属区域, 路测网格, 经度, 纬度, sectionid,
+                               CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, TRUE
+                        FROM df_import
+                    """)
+                self.conn.unregister("df_import")
+                self.conn.execute("COMMIT")
+            except Exception:
+                self.conn.execute("ROLLBACK")
+                try:
+                    self.conn.unregister("_bak_active")
+                except Exception:
+                    pass
+                try:
+                    self.conn.unregister("df_import")
+                except Exception:
+                    pass
+                raise
+        else:
+            self.conn.register("df_import", df)
+            self.conn.execute("""
+                INSERT OR REPLACE INTO 共站同覆盖小区表 (
+                    CGI, 共站同覆盖名, 物理站名, 小区名称, 使用频段,
+                    是否覆盖层, 小区所属区域, 路测网格, 经度, 纬度, sectionid,
+                    创建时间, 更新时间, is_active
+                )
+                SELECT CGI, 共站同覆盖名, 物理站名, 小区名称, 使用频段,
+                       是否覆盖层, 小区所属区域, 路测网格, 经度, 纬度, sectionid,
+                       CURRENT_TIMESTAMP, CURRENT_TIMESTAMP,
+                       COALESCE((SELECT t.is_active FROM 共站同覆盖小区表 t WHERE t.CGI = df_import.CGI), TRUE)
+                FROM df_import
+            """)
+            self.conn.unregister("df_import")
 
         return len(df)
 

@@ -19,7 +19,6 @@ from app.pipelines.io import (
     db_to_dataframe,
     excel_to_db,
     get_db_connection,
-    get_excel_engine,
     get_table_columns,
     get_unified_db_connection,
     init_db,

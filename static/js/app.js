@@ -22,6 +22,10 @@
       conflictCount: 0,
       fixCount: null,
     },
+    multiweek: {
+      weeks: [],
+      selected: new Set(),
+    },
     zeroFlow: {
       columns: [],
       records: [],
@@ -75,11 +79,14 @@
   }
 
   function setBusy(busy) {
-    ["startCapacityBtn", "startPhysicalBtn", "startNrmSyncBtn", "startLoweffBtn", "startZeroFlowBtn", "startZeroFlow5gBtn", "checkConflictBtn", "fixConflictBtn"]
+    ["startCapacityBtn", "startPhysicalBtn", "startNrmSyncBtn", "startLoweffBtn", "startZeroFlowBtn", "startZeroFlow5gBtn", "checkConflictBtn", "fixConflictBtn",
+     "multiweekStartBtn", "multiweekRefreshBtn"]
       .forEach((id) => {
         const el = $(id);
         if (el) el.disabled = busy;
       });
+    const mwFileInput = $("multiweekFileInput");
+    if (mwFileInput) mwFileInput.disabled = busy;
   }
 
   function renderResultLinks(files) {
@@ -565,6 +572,7 @@
     if (name === "loweff") loadLoweff().catch(() => {});
     if (name === "zeroflow") loadZeroFlow().catch(() => {});
     if (name === "physquery") loadPhysQuery({ resetOffset: false }).catch(() => {});
+    if (name === "multiweek") loadWeekFiles().catch(() => {});
   }
 
 
@@ -1093,6 +1101,16 @@
     $("zeroFlowKeyword").onkeydown = (e) => {
       if (e.key === "Enter") loadZeroFlow().catch((err) => alert(err.message));
     };
+    // Multi-week buttons
+    if ($("multiweekRefreshBtn")) {
+      $("multiweekRefreshBtn").onclick = () => loadWeekFiles().catch((e) => alert(e.message));
+    }
+    if ($("multiweekStartBtn")) {
+      $("multiweekStartBtn").onclick = () => startMultiWeekLoweff();
+    }
+    if ($("multiweekFileInput")) {
+      $("multiweekFileInput").onchange = (e) => uploadMultiWeekFiles(e.target.files);
+    }
     $("loadLoweffBtn").onclick = () => loadLoweff().catch((e) => alert(e.message));
     $("loweffSheet").onchange = () => loadLoweff().catch(() => {});
     if ($("loweffType")) $("loweffType").onchange = () => loadLoweff().catch(() => {});
@@ -1282,6 +1300,115 @@
         btn.setAttribute("aria-expanded", "false");
       }
     });
+  }
+
+  // ── Multi-week 4G evaluation ──────────────────────────────────────────
+
+  async function loadWeekFiles() {
+    const box = $("multiweekWeekList");
+    box.innerHTML = '<p class="muted" style="font-size:13px">正在扫描...</p>';
+    state.multiweek.weeks = [];
+    state.multiweek.selected.clear();
+
+    try {
+      const weeks = await api("/api/jobs/multi-week/weeks");
+      state.multiweek.weeks = weeks || [];
+
+      if (!weeks || !weeks.length) {
+        box.innerHTML = '<p class="muted" style="font-size:13px">未找到可用的「重要场景-周」文件，请先将文件放入 data/ 目录</p>';
+        $("multiweekStartBtn").disabled = true;
+        return;
+      }
+
+      box.innerHTML = "";
+      const ul = document.createElement("ul");
+      ul.style.cssText = "list-style:none;padding:0;margin:0;display:flex;flex-direction:column;gap:6px";
+
+      weeks.forEach((w, i) => {
+        const li = document.createElement("li");
+        li.style.cssText = "display:flex;align-items:center;gap:8px;padding:6px 10px;border:1px solid var(--border);border-radius:6px;cursor:pointer;transition:background .15s";
+        li.innerHTML = `<input type="checkbox" id="mw-week-${i}" data-idx="${i}" style="cursor:pointer" />
+          <label for="mw-week-${i}" style="cursor:pointer;flex:1">
+            <strong>${w.period_label}</strong>
+            <span class="muted" style="font-size:12px;margin-left:6px">${w.rel_path}</span>
+          </label>`;
+        const cb = li.querySelector("input");
+        cb.addEventListener("change", () => {
+          if (cb.checked) {
+            state.multiweek.selected.add(i);
+            li.style.background = "var(--primary-bg, rgba(37,99,235,.08))";
+          } else {
+            state.multiweek.selected.delete(i);
+            li.style.background = "";
+          }
+          $("multiweekStartBtn").disabled = state.multiweek.selected.size < 2;
+        });
+        ul.appendChild(li);
+      });
+      box.appendChild(ul);
+
+      const hint = document.createElement("p");
+      hint.className = "muted";
+      hint.style.cssText = "font-size:12px;margin-top:6px";
+      hint.textContent = `共 ${weeks.length} 个周期文件，至少选择 2 个开始评估`;
+      box.appendChild(hint);
+    } catch (err) {
+      box.innerHTML = `<p style="color:var(--danger);font-size:13px">扫描失败: ${err.message}</p>`;
+    }
+  }
+
+  async function startMultiWeekLoweff() {
+    const selected = [...state.multiweek.selected];
+    if (selected.length < 2) {
+      alert("请至少选择 2 个周期文件");
+      return;
+    }
+    const paths = selected.map((i) => state.multiweek.weeks[i].path);
+
+    try {
+      setBusy(true);
+      $("logBox").textContent = "";
+      setProgress(0, "多周期评估启动中...");
+      renderResultLinks([]);
+
+      const job = await api("/api/jobs/start/multi-week-loweff", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ week_file_paths: paths }),
+      });
+      state.jobId = job.id;
+      if (state.pollTimer) clearInterval(state.pollTimer);
+      state.pollTimer = setInterval(pollJob, 1000);
+      await pollJob();
+    } catch (err) {
+      setBusy(false);
+      appendLog([`启动失败: ${err.message}`]);
+      setProgress(0, "启动失败");
+    }
+  }
+
+  async function uploadMultiWeekFiles(fileList) {
+    if (!fileList || !fileList.length) return;
+    const formData = new FormData();
+    for (const f of fileList) formData.append("files", f);
+    try {
+      setBusy(true);
+      $("logBox").textContent = "";
+      setProgress(0, `导入 ${fileList.length} 个周文件...`);
+      renderResultLinks([]);
+      const uploadRes = await api("/api/data/upload", { method: "POST", body: formData });
+      appendLog([`已上传 ${uploadRes.count} 个文件: ${(uploadRes.saved || []).join(", ")}`]);
+      setProgress(50, "刷新可用周文件列表...");
+      await loadWeekFiles();
+      appendLog(["周文件列表已刷新，可勾选后开始评估"]);
+      setProgress(100, "导入完成");
+    } catch (err) {
+      appendLog([`导入失败: ${err.message}`]);
+      setProgress(0, "导入失败");
+    } finally {
+      $("multiweekFileInput").value = "";
+      setBusy(false);
+    }
   }
 
   async function init() {

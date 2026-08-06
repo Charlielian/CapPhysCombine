@@ -55,9 +55,9 @@ def load_cog_coverage_mapping(
     """
     logger = logger or GuiLogger()
 
-    # 使用统一数据库的共站同覆盖表
+    # 使用统一数据库的共站同覆盖表（复用传入的 conn）
     try:
-        with CogCoverageManager() as mgr:
+        with CogCoverageManager(conn=conn) as mgr:
             count = mgr.get_count()
             if count == 0:
                 logger.log("统一数据库中共站同覆盖表为空，请通过管理界面导入")
@@ -172,6 +172,8 @@ def load_sources_to_db(conn: duckdb.DuckDBPyConnection, logger: GuiLogger | None
     db_path_str = str(DB_PATH)
     max_workers = min(len(selected) if selected else 1, 8)
 
+    import_errors: dict[str, str] = {}
+
     with ThreadPoolExecutor(max_workers=max_workers, thread_name_prefix="import") as executor:
         futures = {
             executor.submit(
@@ -189,13 +191,20 @@ def load_sources_to_db(conn: duckdb.DuckDBPyConnection, logger: GuiLogger | None
             try:
                 _, rows, cols, elapsed, error = future.result()
                 if error:
+                    import_errors[name] = error
                     logger.log(f"导入失败 [{name}]: {error}")
                 else:
                     logger.log(
                         f"导入完成 [{name}]: {rows} 行 x {cols} 列 (耗时 {elapsed:.1f}s)"
                     )
             except Exception as e:
+                import_errors[name] = str(e)
                 logger.log(f"导入异常 [{name}]: {e}")
+
+    if import_errors:
+        logger.warning(
+            f"共 {len(import_errors)} 个文件类型导入失败: {', '.join(import_errors.keys())}"
+        )
 
     # 导入共站同覆盖表（如果存在）—— 串行，因为依赖统一数据库
     import_cog_coverage_to_db(conn, logger)
@@ -222,10 +231,10 @@ def apply_sector_mapping(table: pd.DataFrame, mapping: pd.DataFrame, cgi_column:
     mapping_cols = ["共站同覆盖名", "路测网格", "乡镇街道", "是否覆盖层", "小区所属区域"]
     mapping_cols = [col for col in mapping_cols if col in mapping.columns]
 
+    # 去重：若 mapping 中有重复 CGI，只保留第一条
+    mapping = mapping.drop_duplicates(subset=["CGI"], keep="first")
+
     # 遍历映射每个字段
-    # 修复：原实现 table[target_col] = table[cgi_column].map(col_mapping)
-    # 会用 NaN 覆盖映射未命中的行（包括原本已有值的行）。
-    # 改为 combine_first：仅当映射命中时覆盖，未命中保留原值。
     for col in mapping_cols:
         col_mapping = dict(zip(mapping["CGI"], mapping[col]))
         target_col = "扇区" if col == "共站同覆盖名" else col
@@ -246,6 +255,15 @@ def apply_sector_mapping(table: pd.DataFrame, mapping: pd.DataFrame, cgi_column:
     return table
 
 
+_5G_TEMP_TABLES = ("_5g_day_agg", "_5g_day_weekday", "_5g_day_weekend", "_5g_day_zero_stats", "_5g_mr_agg", "_5g_kpi_agg")
+_4G_TEMP_TABLES = ("_4g_day_temp", "_4g_day_agg", "_4g_day_weekday", "_4g_day_weekend", "_4g_mr_agg")
+
+
+def _drop_temp_tables(conn, tables):
+    for t in tables:
+        conn.execute(f"DROP TABLE IF EXISTS {t}")
+
+
 def build_5g_table(conn: duckdb.DuckDBPyConnection, logger: GuiLogger | None = None) -> pd.DataFrame:
     logger = logger or GuiLogger()
 
@@ -254,9 +272,7 @@ def build_5g_table(conn: duckdb.DuckDBPyConnection, logger: GuiLogger | None = N
     day_cols = get_table_columns(conn, "5g_day")
     util_col_5g = "忙时小区PRB利用率" if "忙时小区PRB利用率" in day_cols else "忙时小区PRB利用率(%)"
 
-    conn.execute("DROP TABLE IF EXISTS _5g_day_agg")
-    conn.execute("DROP TABLE IF EXISTS _5g_day_weekday")
-    conn.execute("DROP TABLE IF EXISTS _5g_day_weekend")
+    _drop_temp_tables(conn, _5G_TEMP_TABLES)
 
     conn.execute(f"""
         CREATE TABLE _5g_day_agg AS
@@ -301,7 +317,6 @@ def build_5g_table(conn: duckdb.DuckDBPyConnection, logger: GuiLogger | None = N
         GROUP BY CAST(NCGI AS VARCHAR)
     """)
 
-    conn.execute("DROP TABLE IF EXISTS _5g_day_zero_stats")
     conn.execute("""
         CREATE TABLE _5g_day_zero_stats AS
         WITH day_raw AS (
@@ -345,7 +360,6 @@ def build_5g_table(conn: duckdb.DuckDBPyConnection, logger: GuiLogger | None = N
     """)
 
     logger.log("  [5G] 在数据库中进行 MR 表聚合...")
-    conn.execute("DROP TABLE IF EXISTS _5g_mr_agg")
     conn.execute("""
         CREATE TABLE _5g_mr_agg AS
         SELECT
@@ -363,7 +377,6 @@ def build_5g_table(conn: duckdb.DuckDBPyConnection, logger: GuiLogger | None = N
     """)
 
     logger.log("  [5G] 在数据库中进行 KPI 表聚合...")
-    conn.execute("DROP TABLE IF EXISTS _5g_kpi_agg")
     conn.execute("""
         CREATE TABLE _5g_kpi_agg AS
         SELECT
@@ -388,6 +401,12 @@ def build_5g_table(conn: duckdb.DuckDBPyConnection, logger: GuiLogger | None = N
     zero_stats = db_to_dataframe("SELECT * FROM _5g_day_zero_stats", conn)
     mr_agg = db_to_dataframe("SELECT * FROM _5g_mr_agg", conn)
     kpi_agg = db_to_dataframe("SELECT * FROM _5g_kpi_agg", conn)
+
+    # Drop columns from week_unique that also exist in day_agg to prevent
+    # pandas from creating _x/_y suffixed duplicates during the merge.
+    _overlap = [c for c in day_agg.columns if c != "NCGI" and c in week_unique.columns]
+    if _overlap:
+        week_unique = week_unique.drop(columns=_overlap)
 
     result = week_unique.merge(day_agg, on="NCGI", how="left")
     result = result.merge(weekday_agg, on="NCGI", how="left")
@@ -457,10 +476,7 @@ def build_4g_table(conn: duckdb.DuckDBPyConnection, logger: GuiLogger | None = N
 
     logger.log("  [4G] 在数据库中进行日表聚合...")
 
-    conn.execute("DROP TABLE IF EXISTS _4g_day_temp")
-    conn.execute("DROP TABLE IF EXISTS _4g_day_agg")
-    conn.execute("DROP TABLE IF EXISTS _4g_day_weekday")
-    conn.execute("DROP TABLE IF EXISTS _4g_day_weekend")
+    _drop_temp_tables(conn, _4G_TEMP_TABLES)
 
     conn.execute("""
         CREATE TABLE _4g_day_temp AS
@@ -568,7 +584,6 @@ def build_4g_table(conn: duckdb.DuckDBPyConnection, logger: GuiLogger | None = N
     """)
 
     logger.log("  [4G] 在数据库中进行 MR 表聚合...")
-    conn.execute("DROP TABLE IF EXISTS _4g_mr_agg")
     conn.execute("""
         CREATE TABLE _4g_mr_agg AS
         SELECT
@@ -786,7 +801,7 @@ def run_pipeline(
         logger.log(f"45G 总表生成完成 (耗时 {elapsed:.1f}s)")
         logger.log("开始生成低效小区结果")
         # 延迟导入避免与 loweff 的循环依赖（loweff 反向依赖 capacity 的构建函数）
-        from app.pipelines.loweff import build_low_efficiency_table
+        from app.pipelines.loweff import build_low_efficiency_table, build_station_band_evaluation
 
         loweff_5g, loweff_4g, loweff_4g_full, loweff_summary = build_low_efficiency_table(
             table_5g, table_4g, table_45g
@@ -795,6 +810,10 @@ def run_pipeline(
             f"低效小区结果生成完成，5G {len(loweff_5g)} 条，4G {len(loweff_4g)} 条，"
             f"全量4G评估 {len(loweff_4g_full)} 条"
         )
+        logger.log("开始生成物理站+频段减容评估")
+        station_band_eval = build_station_band_evaluation(table_4g)
+        able_count = int((station_band_eval["能否减容"] == "是").sum()) if not station_band_eval.empty else 0
+        logger.log(f"物理站+频段评估完成，共 {len(station_band_eval)} 条，可减容 {able_count} 个频段")
         logger.log(f"开始写出文件: {output_paths['5g'].name}")
         start = time.perf_counter(); table_5g.to_excel(output_paths["5g"], index=False); elapsed = time.perf_counter() - start
         progress.update(88, f"已生成: {output_paths['5g'].name}"); logger.log(f"写出 {output_paths['5g'].name} 完成 (耗时 {elapsed:.1f}s)")
@@ -808,6 +827,7 @@ def run_pipeline(
             loweff_5g.to_excel(writer, index=False, sheet_name="5G低效明细")
             loweff_4g.to_excel(writer, index=False, sheet_name="4G低效明细")
             loweff_4g_full.to_excel(writer, index=False, sheet_name="全量4G小区评估")
+            station_band_eval.to_excel(writer, index=False, sheet_name="物理站+频段评估")
             loweff_summary.to_excel(writer, index=False, sheet_name="统计汇总")
         logger.log(f"写出 {LOWEFF_OUTPUT_PATH.name} 完成")
 

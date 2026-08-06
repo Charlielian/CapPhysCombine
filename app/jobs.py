@@ -26,6 +26,11 @@ import pandas as pd
 from app.jsonutil import df_records
 from app.pipelines.capacity import run_pipeline
 from app.pipelines.common import BASE_DIR, LOWEFF_OUTPUT_PATH, UNIFIED_DB_PATH
+from app.pipelines.core import (
+    discover_4g_week_files,
+    run_multi_week_loweff,
+    MULTIWEEK_OUTPUT_PATH,
+)
 from app.pipelines.io import read_excel
 from app.pipelines.loweff import run_low_efficiency_pipeline
 from app.pipelines.nrm_sync import run_nrm_sync_pipeline
@@ -65,6 +70,7 @@ ASSET_DEPS: dict[str, list[str]] = {
     "conflicts_check": ["physical"],   # needs physical table output
     "conflicts_fix": ["physical"],     # needs physical table output
     "loweff": ["capacity"],            # derives from capacity tables
+    "multi_week_loweff": [],           # standalone (reads its own week files)
     "zero_low_flow_4g": [],            # standalone (reads its own input files)
     "zero_low_flow_5g": [],            # standalone
 }
@@ -76,6 +82,7 @@ ASSET_KIND_LABELS: dict[str, str] = {
     "conflicts_check": "扇区冲突检测",
     "conflicts_fix": "扇区冲突修正",
     "loweff": "低效小区分析",
+    "multi_week_loweff": "多周期4G全量评估",
     "zero_low_flow_4g": "4G零低流量分析",
     "zero_low_flow_5g": "5G零低流量分析",
 }
@@ -534,6 +541,23 @@ class JobManager:
 
         return self.start("loweff", runner)
 
+    def start_multi_week_loweff(self, week_file_paths: list[str]) -> Job:
+        def runner(job: Job) -> None:
+            def on_progress(value: int, message: str) -> None:
+                self._set_progress(job, value, message)
+
+            def on_log(message: str) -> None:
+                self._append_log(job, message)
+
+            path = run_multi_week_loweff(
+                week_file_paths=week_file_paths,
+                progress_callback=on_progress,
+                log_callback=on_log,
+            )
+            job.result_files = [Path(path).name]
+
+        return self.start("multi_week_loweff", runner)
+
     def _conflict_payload(self, conflicts: pd.DataFrame) -> dict[str, Any]:
         if conflicts.empty:
             columns = [c for c in CONFLICT_DISPLAY_COLUMNS]
@@ -641,10 +665,16 @@ class JobManager:
             def on_log(message: str) -> None:
                 self._append_log(job, message)
 
+            # file_paths 是 list[str] | None，而 data_dir 期望单个目录路径。
+            # 有文件列表时取其公共父目录；无文件时传 None（使用默认 DATA_DIR）。
+            data_dir: str | None = None
+            if file_paths:
+                data_dir = str(Path(file_paths[0]).parent)
+
             path = run_zero_low_flow_pipeline(
                 progress_callback=on_progress,
                 log_callback=on_log,
-                data_dir=file_paths,
+                data_dir=data_dir,
                 net_type=network,
             )
             job.result_files = [Path(path).name]

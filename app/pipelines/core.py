@@ -2,17 +2,14 @@ from __future__ import annotations
 
 import logging
 import os
-import queue
 import re
-import subprocess
 import sys
-import threading
 import time
 import traceback
 from collections import defaultdict
+from collections.abc import Callable, Iterable
 from datetime import datetime, timedelta
 from pathlib import Path
-from typing import Callable, Iterable
 
 import duckdb
 import numpy as np
@@ -555,8 +552,10 @@ def _cog_coverage_table_exists(conn: duckdb.DuckDBPyConnection) -> bool:
 
 
 def init_unified_database(conn: duckdb.DuckDBPyConnection | None = None) -> duckdb.DuckDBPyConnection:
-    """初始化统一数据库表结构（包含持久化的共站同覆盖表）"""
-    close_conn = conn is None
+    """初始化统一数据库表结构（包含持久化的共站同覆盖表）。
+
+    当传入 conn 时复用已有连接；未传入时创建新连接并保留打开状态返回给调用方。
+    """
     if conn is None:
         conn = get_unified_db_connection()
 
@@ -605,15 +604,12 @@ def init_unified_database(conn: duckdb.DuckDBPyConnection | None = None) -> duck
     if not _cog_coverage_table_exists(conn):
         raise RuntimeError(f"统一数据库初始化失败，表未创建: {UNIFIED_DB_PATH}")
 
-    if close_conn:
-        conn.close()
-
     return conn
 
 
 class CogCoverageManager:
     """共站同覆盖表管理器（CRUD操作）"""
-    
+
     def __init__(self, conn: duckdb.DuckDBPyConnection | None = None):
         self.conn = conn
         self._own_connection = conn is None
@@ -621,32 +617,32 @@ class CogCoverageManager:
             self.conn = get_unified_db_connection()
         # 确保数据库表结构已初始化
         init_unified_database(self.conn)
-    
+
     def close(self):
         """关闭连接"""
         if self._own_connection and self.conn:
             self.conn.close()
             self.conn = None
-    
+
     def __enter__(self):
         return self
-    
+
     def __exit__(self, exc_type, exc_val, exc_tb):
         self.close()
-    
+
     def get_all(self, limit: int | None = None, offset: int = 0) -> pd.DataFrame:
         """获取所有记录"""
         query = "SELECT * FROM 共站同覆盖小区表 ORDER BY CGI"
         if limit:
             query += f" LIMIT {limit} OFFSET {offset}"
         return self.conn.execute(query).fetchdf()
-    
+
     def get_by_cgi(self, cgi: str) -> pd.DataFrame:
         """根据CGI查询单条记录"""
         return self.conn.execute(
             "SELECT * FROM 共站同覆盖小区表 WHERE CGI = ?", [cgi]
         ).fetchdf()
-    
+
     def search(self, keyword: str) -> pd.DataFrame:
         """模糊搜索（物理站名、小区名称、共站同覆盖名）"""
         return self.conn.execute("""
@@ -655,7 +651,7 @@ class CogCoverageManager:
             ORDER BY CGI
         """, [f"%{keyword}%", f"%{keyword}%", f"%{keyword}%", f"%{keyword}%"]
         ).fetchdf()
-    
+
     def add(self, record: dict) -> bool:
         """添加单条记录"""
         try:
@@ -664,7 +660,7 @@ class CogCoverageManager:
                 (CGI, 共站同覆盖名, 物理站名, 小区名称, 使用频段, 是否覆盖层, 小区所属区域, 路测网格, 经度, 纬度, sectionid)
                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """, [
-                record.get("CGI"), record.get("共站同覆盖名"), record.get("物理站名"), 
+                record.get("CGI"), record.get("共站同覆盖名"), record.get("物理站名"),
                 record.get("小区名称"), record.get("使用频段"), record.get("是否覆盖层"),
                 record.get("小区所属区域"), record.get("路测网格"), record.get("经度"),
                 record.get("纬度"), record.get("sectionid")
@@ -673,7 +669,7 @@ class CogCoverageManager:
         except Exception as e:
             print(f"添加记录失败: {e}")
             return False
-    
+
     def update(self, cgi: str, record: dict) -> bool:
         """更新单条记录"""
         try:
@@ -701,7 +697,7 @@ class CogCoverageManager:
         except Exception as e:
             print(f"更新记录失败: {e}")
             return False
-    
+
     def delete(self, cgi: str) -> bool:
         """删除单条记录"""
         try:
@@ -710,7 +706,7 @@ class CogCoverageManager:
         except Exception as e:
             print(f"删除记录失败: {e}")
             return False
-    
+
     def delete_many(self, cgis: list[str]) -> int:
         """批量删除"""
         if not cgis:
@@ -724,14 +720,14 @@ class CogCoverageManager:
         except Exception as e:
             print(f"批量删除失败: {e}")
             return 0
-    
+
     def import_from_excel(self, excel_path: Path | str, replace: bool = False) -> int:
         """从Excel导入共站同覆盖表 - 使用标准模板
         
         模板列：CGI, 共站同覆盖名, 物理站名, 小区名称, 使用频段, 是否覆盖层, 小区所属区域, 路测网格, 经度, 纬度, sectionid
         """
         df = read_excel(Path(excel_path))
-        
+
         # 标准化列名（按模板列名）
         column_mapping = {
             "CGI": "CGI",
@@ -746,36 +742,36 @@ class CogCoverageManager:
             "纬度": "纬度",
             "sectionid": "sectionid",
         }
-        
+
         # 重命名列（匹配模板）
         rename_cols = {}
         for col in df.columns:
             col_stripped = col.strip()
             if col_stripped in column_mapping:
                 rename_cols[col] = column_mapping[col_stripped]
-        
+
         df = df.rename(columns=rename_cols)
-        
+
         # 确保必要列存在
         required_cols = ["CGI", "共站同覆盖名"]
         for col in required_cols:
             if col not in df.columns:
                 raise ValueError(f"Excel缺少必要列: {col}")
-        
+
         # 提取sectionid（从共站同覆盖名）
         if "sectionid" not in df.columns or df["sectionid"].isna().all():
             df["sectionid"] = df["共站同覆盖名"].apply(extract_sectionid)
-        
+
         # 选择数据库中存在的列（按模板结构）
-        db_cols = ["CGI", "共站同覆盖名", "物理站名", "小区名称", "使用频段", 
+        db_cols = ["CGI", "共站同覆盖名", "物理站名", "小区名称", "使用频段",
                    "是否覆盖层", "小区所属区域", "路测网格", "经度", "纬度", "sectionid"]
         existing_cols = [c for c in db_cols if c in df.columns]
         df = df[existing_cols]
-        
+
         # 清空或追加
         if replace:
             self.conn.execute("DELETE FROM 共站同覆盖小区表")
-        
+
         # 批量插入（使用UPSERT处理重复）
         # 显式列出全部目标列，包含 is_active（带默认值），避免与表实际列数/列序耦合。
         # 替换时保留已有记录的激活状态：已存在则沿用，新记录默认 TRUE。
@@ -793,32 +789,32 @@ class CogCoverageManager:
             FROM df_import
         """)
         self.conn.unregister("df_import")
-        
+
         return len(df)
-    
+
     def export_to_excel(self, excel_path: Path | str) -> int:
         """导出到Excel - 使用标准模板列顺序"""
         df = self.get_all()
-        
+
         # 按标准模板顺序排列列
-        template_cols = ["CGI", "共站同覆盖名", "物理站名", "小区名称", "使用频段", 
+        template_cols = ["CGI", "共站同覆盖名", "物理站名", "小区名称", "使用频段",
                         "是否覆盖层", "小区所属区域", "路测网格", "经度", "纬度", "sectionid"]
-        
+
         # 只保留模板中存在的列
         available_cols = [c for c in template_cols if c in df.columns]
         # 添加其他列（如时间戳）
         other_cols = [c for c in df.columns if c not in template_cols]
         final_cols = available_cols + other_cols
-        
+
         df = df[final_cols]
         df.to_excel(excel_path, index=False)
         return len(df)
-    
+
     def get_count(self) -> int:
         """获取记录总数"""
         result = self.conn.execute("SELECT COUNT(*) FROM 共站同覆盖小区表").fetchone()
         return result[0] if result else 0
-    
+
     def get_mapping_dict(self) -> dict[str, dict]:
         """获取CGI到记录的映射字典（供其他模块使用，仅返回激活记录）"""
         df = self.conn.execute(
@@ -855,7 +851,7 @@ def init_physical_database(conn):
     """初始化物理表数据库表结构 - 现在使用统一数据库"""
     # 确保统一库中的共站同覆盖表已就绪（持久化共享，不在此处重建/覆盖）
     init_unified_database(conn)
-    
+
     # Drop existing tables to ensure fresh start (clear any leftover data)
     conn.execute("DROP TABLE IF EXISTS 物理表汇总")
     conn.execute("DROP TABLE IF EXISTS 原始小区表")
@@ -972,10 +968,10 @@ def cleanup_old_logs() -> None:
     """删除超过7天的日志文件"""
     if not LOG_DIR.exists():
         return
-    
+
     cutoff_date = datetime.now() - timedelta(days=LOG_RETENTION_DAYS)
     deleted_count = 0
-    
+
     for log_file in LOG_DIR.glob("app_*.log"):
         try:
             file_time = datetime.fromtimestamp(log_file.stat().st_mtime)
@@ -984,7 +980,7 @@ def cleanup_old_logs() -> None:
                 deleted_count += 1
         except OSError:
             continue
-    
+
     if deleted_count > 0:
         logging.getLogger("CapPhysCombine").info(f"已清理 {deleted_count} 个过期日志文件")
 
@@ -1052,42 +1048,42 @@ def load_cog_coverage_mapping(
 ) -> pd.DataFrame:
     """从统一数据库加载共站同覆盖小区表，返回 CGI -> 共站同覆盖名 的映射表
     
-    现在使用统一数据库的共站同覆盖表，两个功能共享同一个数据源
+    始终使用统一数据库连接（capphys_unified.db），忽略传入的临时库 conn。
     """
     logger = logger or GuiLogger()
-    
-    # 使用统一数据库的共站同覆盖表
+
     try:
+        # 使用统一数据库连接，不依赖传入的临时库 conn
         with CogCoverageManager() as mgr:
             count = mgr.get_count()
             if count == 0:
                 logger.log("统一数据库中共站同覆盖表为空，请通过管理界面导入")
                 return pd.DataFrame(columns=["CGI", "共站同覆盖名"])
-            
+
             logger.log(f"从统一数据库加载共站同覆盖映射表（{count} 条记录）")
-            
+
             # 获取所有数据
             df = mgr.get_all()
             if df.empty:
                 return pd.DataFrame(columns=["CGI", "共站同覆盖名"])
-            
+
             # 选择需要的列
             required_cols = ["CGI", "共站同覆盖名"]
-            extra_cols = ["路测网格", "乡镇街道", "是否覆盖层", "小区所属区域", "覆盖层"]
-            
+            extra_cols = ["路测网格", "乡镇街道", "是否覆盖层", "小区所属区域", "覆盖层", "物理站名"]
+
             available_cols = [c for c in required_cols + extra_cols if c in df.columns]
             mapping = df[available_cols].copy()
-            
+
             # 确保CGI为字符串类型
             mapping["CGI"] = mapping["CGI"].astype(str)
-            
+
             # 去重（保留第一个）
             mapping = mapping.drop_duplicates(subset=["CGI"], keep="first")
-            
+
             extra_loaded = [c for c in extra_cols if c in mapping.columns]
             logger.log(f"共站同覆盖映射表加载完成，共 {len(mapping)} 条映射，额外字段: {extra_loaded}")
             return mapping
-            
+
     except Exception as e:
         logger.log(f"从统一数据库加载共站同覆盖表失败: {e}")
         return pd.DataFrame(columns=["CGI", "共站同覆盖名"])
@@ -1114,6 +1110,511 @@ def init_db() -> None:
             DB_PATH.unlink()
         except OSError:
             pass
+
+
+# ==============================================================================
+# 多周期 4G 全量评估
+# ==============================================================================
+
+_WEEK_DATE_RE = re.compile(r"(\d{4}-\d{2}-\d{2})")
+
+
+def discover_4g_week_files() -> list[dict]:
+    """扫描 DATA_DIR（含子目录）中所有 重要场景-周*.xlsx 文件。
+
+    Returns:
+        按起始日期排序的列表，每项包含:
+        - path: 文件绝对路径
+        - period_label: 期间标签，如 "2026-02-16~02-22"
+        - start_date: 起始日期字符串
+        - end_date: 结束日期字符串
+        - rel_path: 相对于 DATA_DIR 的路径
+    """
+    matches: list[dict] = []
+    for file_path in DATA_DIR.rglob("重要场景-周*.xlsx"):
+        if file_path.name.startswith(".~"):
+            continue
+        dates = _WEEK_DATE_RE.findall(file_path.name)
+        if len(dates) >= 2:
+            start_date, end_date = dates[0], dates[1]
+            s_parts = start_date.split("-")
+            e_parts = end_date.split("-")
+            if s_parts[0] == e_parts[0] and s_parts[1] == e_parts[1]:
+                period_label = f"{start_date}~{e_parts[2]}"
+            elif s_parts[0] == e_parts[0]:
+                period_label = f"{start_date}~{e_parts[1]}-{e_parts[2]}"
+            else:
+                period_label = f"{start_date}~{end_date}"
+        else:
+            start_date = end_date = ""
+            period_label = file_path.stem
+
+        rel = str(file_path.relative_to(DATA_DIR))
+        matches.append({
+            "path": str(file_path.resolve()),
+            "period_label": period_label,
+            "start_date": start_date,
+            "end_date": end_date,
+            "rel_path": rel,
+        })
+
+    matches.sort(key=lambda x: x["start_date"] or x["rel_path"])
+    return matches
+
+
+MULTIWEEK_OUTPUT_PATH = BASE_DIR / "多周期4G全量评估.xlsx"
+
+
+def _build_4g_df_from_week(conn: duckdb.DuckDBPyConnection, logger: GuiLogger | None = None) -> pd.DataFrame:
+    """从 4g_week 表直接构建 4G 容量 DataFrame（不依赖日表/MR/KPI）。
+    
+    返回带有以下列的 DataFrame:
+    - CGI, 小区名称, 所属站点名称(作为物理站), 所属地市(作为地市)
+    - band: 标准化频段
+    - 自忙时利用率: max(上行PRB, 下行PRB)
+    - 日均流量: 日平均4G流量（GB）
+    - 自忙时有效RRC连接平均数: 自忙时有效RRC连接最大数
+    """
+    logger = logger or GuiLogger()
+    
+    week_df = load_small_table(conn, "4g_week")
+    if week_df.empty:
+        logger.log("  [4G周表评估] 周表为空")
+        return pd.DataFrame()
+    
+    logger.log(f"  [4G周表评估] 从周表直接构建，共 {len(week_df)} 条原始记录")
+    
+    result = pd.DataFrame()
+    result["CGI"] = week_df["CGI"].astype(str)
+    result["小区名称"] = week_df.get("小区名称", pd.Series(dtype=str))
+    result["物理站"] = week_df.get("所属站点名称", pd.Series(dtype=str))
+    result["地市"] = week_df.get("所属地市", pd.Series(dtype=str))
+    
+    # band 标准化：使用频段 → 标准频段代码
+    raw_band = week_df.get("使用频段", pd.Series(dtype=str))
+    result["band"] = raw_band.map(lambda v: _normalize_capacity_band(v) if pd.notna(v) else "")
+    
+    # 覆盖类型
+    result["覆盖类型"] = week_df.get("覆盖类型", pd.Series(dtype=str))
+    
+    # 自忙时利用率 = max(上行PRB, 下行PRB)
+    up = pd.to_numeric(week_df.get("自忙时上行PRB平均利用率", pd.Series()), errors="coerce")
+    down = pd.to_numeric(week_df.get("自忙时下行PRB平均利用率", pd.Series()), errors="coerce")
+    result["自忙时利用率"] = pd.concat([up, down], axis=1).max(axis=1)
+    
+    # 忙时流量 = 日平均4G流量（GB）
+    result["日均流量"] = pd.to_numeric(week_df.get("日平均4G流量（GB）", pd.Series()), errors="coerce")
+    
+    # 自忙时有效RRC连接平均数
+    result["自忙时有效RRC连接平均数"] = pd.to_numeric(
+        week_df.get("自忙时有效RRC连接最大数", pd.Series()), errors="coerce"
+    )
+    
+    # 保留上行/下行 PRB（扇区等效计算可能需要）
+    result["自忙时上行PRB平均利用率"] = up
+    result["自忙时下行PRB平均利用率"] = down
+    
+    # 去重
+    result = result.drop_duplicates(subset=["CGI"]).copy()
+    logger.log(f"  [4G周表评估] 去重后 {len(result)} 条")
+    
+    return result
+
+
+def run_multi_week_loweff(
+    week_file_paths: list[str],
+    progress_callback: ProgressCallback | None = None,
+    log_callback: LogCallback | None = None,
+) -> Path:
+    """对用户选定的多个周文件逐一执行 4G 全量低效评估，最后合并跨周期汇总。
+
+    Args:
+        week_file_paths: 选中的 重要场景-周*.xlsx 文件绝对路径列表（至少2个）。
+        progress_callback: 进度回调 (0-100, message)。
+        log_callback: 日志回调。
+
+    Returns:
+        输出 Excel 文件路径 (MULTIWEEK_OUTPUT_PATH)。
+    """
+    if len(week_file_paths) < 2:
+        raise ValueError("请至少选择2个周文件进行多周期评估")
+
+    started_at = time.perf_counter()
+    logger = GuiLogger(log_callback)
+    logger.log("=" * 50)
+    logger.log("多周期 4G 全量评估启动")
+    logger.log("=" * 50)
+    progress = GuiProgress(progress_callback, logger)
+
+    all_weeks = discover_4g_week_files()
+    path_map = {w["path"]: w for w in all_weeks}
+
+    selected: list[dict] = []
+    for fp in week_file_paths:
+        resolved = str(Path(fp).resolve())
+        info = path_map.get(resolved)
+        if info is None:
+            dates = _WEEK_DATE_RE.findall(Path(fp).name)
+            if len(dates) >= 2:
+                info = {
+                    "path": resolved,
+                    "period_label": f"{dates[0]}~{dates[1]}",
+                    "start_date": dates[0],
+                    "end_date": dates[1],
+                    "rel_path": str(Path(fp).relative_to(DATA_DIR)) if DATA_DIR in str(fp) else Path(fp).name,
+                }
+            else:
+                info = {"path": resolved, "period_label": Path(fp).stem,
+                        "start_date": "", "end_date": "", "rel_path": Path(fp).name}
+        selected.append(info)
+
+    selected.sort(key=lambda x: x["start_date"] or x["rel_path"])
+
+    logger.log(f"共选择 {len(selected)} 个周期：")
+    for i, s in enumerate(selected, 1):
+        logger.log(f"  周期{i}: {s['period_label']} ({Path(s['path']).name})")
+
+    progress.update(3, "初始化数据库...")
+    init_db()
+    conn = get_db_connection()
+
+    try:
+        # 加载共站同覆盖映射（所有周期共用）
+        progress.update(5, "加载共站同覆盖映射...")
+        cog_mapping = load_cog_coverage_mapping(conn, logger)
+
+        per_week_results: list[dict] = []
+        total_weeks = len(selected)
+
+        for idx, week_info in enumerate(selected):
+            pct_base = 10 + int(80 * idx / total_weeks)
+            pct_end = 10 + int(80 * (idx + 1) / total_weeks)
+            period_label = week_info["period_label"]
+            week_path = Path(week_info["path"])
+
+            logger.log(f"\n--- 周期 {idx + 1}/{total_weeks}: {period_label} ---")
+            progress.update(pct_base, f"正在评估周期 {idx + 1}/{total_weeks}: {period_label}")
+
+            # 步骤1: 导入该周期的周文件
+            conn.execute('DROP TABLE IF EXISTS "4g_week"')
+            small_excel_to_db(week_path, "4g_week", conn, logger, append=False)
+            logger.log(f"  导入周表: {week_path.name}")
+
+            # 步骤2: 从周表直接构建 4G 评估表（不依赖日表/MR/KPI）
+            progress.update(pct_base + int((pct_end - pct_base) * 0.3),
+                            f"构建 4G 评估表...")
+            table_4g = _build_4g_df_from_week(conn, logger)
+            logger.log(f"  4G 评估表: {len(table_4g)} 条记录")
+
+            if table_4g.empty:
+                logger.log(f"  ⚠️ 周表为空，跳过周期 {period_label}")
+                empty_df = pd.DataFrame(columns=FULL_4G_EVAL_COLUMNS)
+                per_week_results.append({
+                    "period_label": period_label,
+                    "start_date": week_info["start_date"],
+                    "end_date": week_info["end_date"],
+                    "file_name": week_path.name,
+                    "full_eval": empty_df,
+                    "summary": pd.DataFrame(),
+                })
+                continue
+
+            # 步骤3: 应用共站同覆盖映射（扇区+物理站）
+            progress.update(pct_base + int((pct_end - pct_base) * 0.5),
+                            f"应用共站同覆盖映射...")
+            if not cog_mapping.empty:
+                table_4g = apply_sector_mapping(table_4g, cog_mapping, "CGI", logger)
+            else:
+                # 无共站同覆盖表时，使用所属站点名称作为扇区回退值
+                logger.log("  共站同覆盖表为空，使用所属站点名称作为扇区")
+                table_4g["扇区"] = table_4g["物理站"].fillna("").astype(str)
+
+            # 步骤4: 执行 4G 低效评估（5G 和 45G 表使用空表）
+            progress.update(pct_base + int((pct_end - pct_base) * 0.7),
+                            f"执行 4G 低效评估...")
+            empty_5g = pd.DataFrame()
+            table_45g = table_4g.copy()  # 无5G时 45G 等同于 4G
+
+            _loweff_5g, _loweff_4g, loweff_4g_full, loweff_summary = (
+                build_low_efficiency_table(empty_5g, table_4g, table_45g)
+            )
+
+            logger.log(f"  全量4G评估: {len(loweff_4g_full)} 条")
+            able_count = int((loweff_4g_full["能否减容"] == "是").sum()) if not loweff_4g_full.empty else 0
+            logger.log(f"  符合减容条件: {able_count} 条")
+
+            station_band_eval = build_station_band_evaluation(table_4g)
+            sb_able = int((station_band_eval["能否减容"] == "是").sum()) if not station_band_eval.empty else 0
+            logger.log(f"  物理站+频段评估: {len(station_band_eval)} 条, 可减容 {sb_able} 个频段")
+
+            per_week_results.append({
+                "period_label": period_label,
+                "start_date": week_info["start_date"],
+                "end_date": week_info["end_date"],
+                "file_name": week_path.name,
+                "full_eval": loweff_4g_full,
+                "station_band_eval": station_band_eval,
+                "summary": loweff_summary,
+            })
+
+            progress.update(pct_end, f"周期 {idx + 1}/{total_weeks} ({period_label}) 评估完成")
+
+        progress.update(92, "构建跨周期汇总...")
+        logger.log("\n--- 构建跨周期汇总 ---")
+        summary_df = _build_cross_period_summary(per_week_results, logger)
+        sb_summary_df = _build_cross_period_station_band_summary(per_week_results, logger)
+
+        progress.update(95, "写出 Excel...")
+        logger.log(f"写出 {MULTIWEEK_OUTPUT_PATH.name}...")
+        with pd.ExcelWriter(MULTIWEEK_OUTPUT_PATH) as writer:
+            for week_result in per_week_results:
+                sheet_name = week_result["period_label"][:31]
+                week_result["full_eval"].to_excel(writer, index=False, sheet_name=sheet_name)
+                sb_name = f"{sheet_name[:24]}_频段" if len(sheet_name) > 25 else f"{sheet_name}_频段"
+                week_result["station_band_eval"].to_excel(writer, index=False, sheet_name=sb_name)
+            summary_df.to_excel(writer, index=False, sheet_name="跨周期汇总")
+            sb_summary_df.to_excel(writer, index=False, sheet_name="跨周期汇总_频段")
+
+        logger.log(f"写出 {MULTIWEEK_OUTPUT_PATH.name} 完成")
+        progress.update(100, f"已生成: {MULTIWEEK_OUTPUT_PATH.name}")
+
+        elapsed = time.perf_counter() - started_at
+        logger.log(f"多周期评估完成，共 {len(selected)} 个周期，耗时 {elapsed:.1f}s")
+        logger.log("=" * 50)
+        return MULTIWEEK_OUTPUT_PATH
+
+    finally:
+        conn.close()
+        try:
+            if DB_PATH.exists():
+                DB_PATH.unlink()
+                logger.log("临时数据库已清理")
+        except OSError:
+            pass
+
+
+def _import_shared_sources(
+    conn: duckdb.DuckDBPyConnection, logger: GuiLogger | None = None
+) -> None:
+    """导入非周表的共享数据源。"""
+    logger = logger or GuiLogger()
+
+    shared_patterns: dict[str, str] = {
+        "4g_day": "重要场景-天*.xlsx",
+        "4g_mr": "4GMR覆盖-小区天*.xlsx",
+        "5g_day": "5G小区容量报表*.xlsx",
+        "5g_mr": "5GMR覆盖-小区天*.xlsx",
+        "5g_kpi": "5G小区性能KPI报表*.xlsx",
+        "5g_week": "5G小区容量-周*.xlsx",
+    }
+
+    for name, pattern in shared_patterns.items():
+        files = pick_matching_files(pattern)
+        if not files:
+            logger.log(f"  跳过 {name}: 未找到匹配文件 ({pattern})")
+            continue
+        try:
+            total_rows = 0
+            for i, path in enumerate(files):
+                append = i > 0
+                if name in LARGE_TABLES:
+                    rows = excel_to_db(path, name, conn, logger, append=append)
+                else:
+                    rows = small_excel_to_db(path, name, conn, logger, append=append)
+                total_rows += rows
+            logger.log(f"  导入 {name}: {total_rows} 行 ({len(files)} 个文件)")
+        except Exception as e:
+            logger.log(f"  导入 {name} 失败: {e}")
+
+    import_cog_coverage_to_db(conn, logger)
+
+
+def _build_cross_period_summary(
+    per_week_results: list[dict],
+    logger: GuiLogger | None = None,
+) -> pd.DataFrame:
+    """根据多个周期的全量4G评估结果，构建跨周期汇总表。"""
+    logger = logger or GuiLogger()
+
+    if not per_week_results:
+        return pd.DataFrame()
+
+    period_map: dict[str, dict[str, str]] = {}
+    first_eval: dict[str, dict] = {}
+
+    for week_result in per_week_results:
+        label = week_result["period_label"]
+        eval_df = week_result["full_eval"]
+        cgi_map: dict[str, str] = {}
+
+        if not eval_df.empty:
+            for _, row in eval_df.iterrows():
+                cgi = str(row.get("CGI/NCGI", ""))
+                if not cgi or cgi == "nan":
+                    continue
+                verdict = str(row.get("能否减容", "否"))
+                reason = str(row.get("低效原因", "")) if pd.notna(row.get("低效原因")) else ""
+                if reason:
+                    cgi_map[cgi] = f"{verdict}({reason})"
+                else:
+                    cgi_map[cgi] = verdict
+
+                if cgi not in first_eval:
+                    first_eval[cgi] = {
+                        "CGI/NCGI": cgi,
+                        "小区名称": row.get("小区名称", ""),
+                        "物理站": row.get("物理站", ""),
+                        "扇区": row.get("扇区", ""),
+                        "同扇区纯4G频段": row.get("同扇区纯4G频段", ""),
+                        "同扇区包含5G频段": row.get("同扇区包含5G频段", ""),
+                        "物理站纯4G频段": row.get("物理站纯4G频段", ""),
+                        "物理站包含5G频段": row.get("物理站包含5G频段", ""),
+                        "地市": row.get("地市", ""),
+                    }
+
+        period_map[label] = cgi_map
+        logger.log(f"  周期 [{label}]: {len(cgi_map)} 个CGI，"
+                    f"符合减容 {sum(1 for v in cgi_map.values() if str(v).startswith('是'))} 个")
+
+    all_cgis = sorted(first_eval.keys())
+    period_labels = [wr["period_label"] for wr in per_week_results]
+
+    summary_rows: list[dict] = []
+    for cgi in all_cgis:
+        row_data = dict(first_eval[cgi])
+
+        yes_count = 0
+        for label in period_labels:
+            can_reduce = period_map.get(label, {}).get(cgi, "否")
+            row_data[f"{label}_能否减容"] = can_reduce
+            if str(can_reduce).startswith("是"):
+                yes_count += 1
+
+        row_data["符合周期数"] = yes_count
+        row_data["总周期数"] = len(period_labels)
+
+        if yes_count == len(period_labels) and len(period_labels) > 0:
+            row_data["综合结论"] = "能减容"
+        elif yes_count > 0:
+            row_data["综合结论"] = "部分周期符合"
+        else:
+            row_data["综合结论"] = "不能减容"
+
+        summary_rows.append(row_data)
+
+    summary_df = pd.DataFrame(summary_rows)
+
+    base_cols = ["CGI/NCGI", "小区名称", "物理站", "扇区",
+                 "同扇区纯4G频段", "同扇区包含5G频段",
+                 "物理站纯4G频段", "物理站包含5G频段", "地市"]
+    period_cols = [f"{label}_能否减容" for label in period_labels]
+    verdict_cols = ["符合周期数", "总周期数", "综合结论"]
+    ordered = [c for c in base_cols + period_cols + verdict_cols if c in summary_df.columns]
+    extra = [c for c in summary_df.columns if c not in ordered]
+    summary_df = summary_df[ordered + extra]
+
+    able_count = int((summary_df["综合结论"] == "能减容").sum()) if not summary_df.empty else 0
+    partial_count = int((summary_df["综合结论"] == "部分周期符合").sum()) if not summary_df.empty else 0
+    unable_count = int((summary_df["综合结论"] == "不能减容").sum()) if not summary_df.empty else 0
+    logger.log(f"\n跨周期汇总: 共 {len(summary_df)} 个CGI")
+    logger.log(f"  能减容（全部周期符合）: {able_count}")
+    logger.log(f"  部分周期符合: {partial_count}")
+    logger.log(f"  不能减容: {unable_count}")
+
+    return summary_df
+
+
+def _build_cross_period_station_band_summary(
+    per_week_results: list[dict],
+    logger: GuiLogger | None = None,
+) -> pd.DataFrame:
+    """根据多个周期的物理站+频段评估结果，构建跨周期汇总表。"""
+    logger = logger or GuiLogger()
+
+    if not per_week_results:
+        return pd.DataFrame()
+
+    period_map: dict[str, dict[str, str]] = {}
+    first_eval: dict[str, dict] = {}
+
+    for week_result in per_week_results:
+        label = week_result["period_label"]
+        eval_df = week_result.get("station_band_eval", pd.DataFrame())
+        sb_map: dict[str, str] = {}
+
+        if not eval_df.empty:
+            for _, row in eval_df.iterrows():
+                station = str(row.get("物理站", ""))
+                band = str(row.get("频段", ""))
+                if not station or not band or station == "nan":
+                    continue
+                key = f"{station}||{band}"
+                verdict = str(row.get("能否减容", "否"))
+                reason = str(row.get("低效原因", "")) if pd.notna(row.get("低效原因")) else ""
+                if reason:
+                    sb_map[key] = f"{verdict}({reason})"
+                else:
+                    sb_map[key] = verdict
+
+                if key not in first_eval:
+                    first_eval[key] = {
+                        "物理站": station,
+                        "频段": band,
+                        "频段内小区数": row.get("频段内小区数", ""),
+                        "等效载波权重": row.get("等效载波权重", ""),
+                        "物理站含所有4G频段": row.get("物理站含所有4G频段", ""),
+                        "地市": row.get("地市", ""),
+                    }
+
+        period_map[label] = sb_map
+        logger.log(f"  周期 [{label}] 物理站+频段: {len(sb_map)} 个，"
+                    f"可减容 {sum(1 for v in sb_map.values() if str(v).startswith('是'))} 个")
+
+    all_keys = sorted(first_eval.keys())
+    period_labels = [wr["period_label"] for wr in per_week_results]
+
+    summary_rows: list[dict] = []
+    for key in all_keys:
+        row_data = dict(first_eval[key])
+
+        yes_count = 0
+        for label in period_labels:
+            can_reduce = period_map.get(label, {}).get(key, "否")
+            row_data[f"{label}_能否减容"] = can_reduce
+            if str(can_reduce).startswith("是"):
+                yes_count += 1
+
+        row_data["符合周期数"] = yes_count
+        row_data["总周期数"] = len(period_labels)
+
+        if yes_count == len(period_labels) and len(period_labels) > 0:
+            row_data["综合结论"] = "能减容"
+        elif yes_count > 0:
+            row_data["综合结论"] = "部分周期符合"
+        else:
+            row_data["综合结论"] = "不能减容"
+
+        summary_rows.append(row_data)
+
+    summary_df = pd.DataFrame(summary_rows)
+
+    base_cols = ["物理站", "频段", "频段内小区数", "等效载波权重",
+                 "物理站含所有4G频段", "地市"]
+    period_cols = [f"{label}_能否减容" for label in period_labels]
+    verdict_cols = ["符合周期数", "总周期数", "综合结论"]
+    ordered = [c for c in base_cols + period_cols + verdict_cols if c in summary_df.columns]
+    extra = [c for c in summary_df.columns if c not in ordered]
+    summary_df = summary_df[ordered + extra]
+
+    able_count = int((summary_df["综合结论"] == "能减容").sum()) if not summary_df.empty else 0
+    partial_count = int((summary_df["综合结论"] == "部分周期符合").sum()) if not summary_df.empty else 0
+    unable_count = int((summary_df["综合结论"] == "不能减容").sum()) if not summary_df.empty else 0
+    logger.log(f"\n跨周期物理站+频段汇总: 共 {len(summary_df)} 个(物理站,频段)")
+    logger.log(f"  能减容（全部周期符合）: {able_count}")
+    logger.log(f"  部分周期符合: {partial_count}")
+    logger.log(f"  不能减容: {unable_count}")
+
+    return summary_df
 
 
 def excel_to_db(
@@ -1148,12 +1649,15 @@ def db_to_dataframe(query: str, conn: duckdb.DuckDBPyConnection) -> pd.DataFrame
 
 
 def table_exists(conn: duckdb.DuckDBPyConnection, table_name: str) -> bool:
-    result = conn.execute(f"SELECT 1 FROM information_schema.tables WHERE table_name = '{table_name}'").fetchone()
+    result = conn.execute(
+        "SELECT 1 FROM information_schema.tables WHERE table_name = ?",
+        [table_name],
+    ).fetchone()
     return result is not None
 
 
 def get_table_columns(conn: duckdb.DuckDBPyConnection, table_name: str) -> list[str]:
-    result = conn.execute(f"DESCRIBE \"{table_name}\"").fetchdf()
+    result = conn.execute(f"DESCRIBE {duckdb.quote_ident(table_name)}").fetchdf()
     return list(result["column_name"])
 
 
@@ -1200,11 +1704,11 @@ def pick_matching_files(pattern: str) -> list[Path]:
     matches = list(DATA_DIR.glob(pattern))
     if not matches:
         return []
-    
+
     def sort_key(path: Path) -> tuple[tuple[str, ...], str]:
         dates = tuple(DATE_RE.findall(path.name))
         return dates, path.name
-    
+
     return sorted(matches, key=sort_key)
 
 
@@ -1228,14 +1732,14 @@ LARGE_TABLES = {"5g_day", "5g_mr", "5g_kpi", "4g_day", "4g_mr"}
 def load_sources_to_db(conn: duckdb.DuckDBPyConnection, logger: GuiLogger | None = None) -> dict[str, list[Path]]:
     """将源数据文件导入数据库（单线程顺序导入，避免DuckDB并发问题）"""
     logger = logger or GuiLogger()
-    
+
     selected: dict[str, list[Path]] = {}
-    
+
     for name, pattern in FILE_PATTERNS.items():
         files = pick_matching_files(pattern)
         if files:
             selected[name] = files
-    
+
     logger.log("使用以下源文件：")
     for name, files in selected.items():
         if len(files) == 1:
@@ -1244,10 +1748,10 @@ def load_sources_to_db(conn: duckdb.DuckDBPyConnection, logger: GuiLogger | None
             logger.log(f"- {name}: {len(files)} 个文件")
             for f in files:
                 logger.log(f"    - {f.name}")
-    
+
     logger.log("开始导入数据...")
     start_total = time.perf_counter()
-    
+
     # 顺序导入，避免DuckDB并发问题
     for name, files in selected.items():
         try:
@@ -1260,19 +1764,19 @@ def load_sources_to_db(conn: duckdb.DuckDBPyConnection, logger: GuiLogger | None
                 else:
                     rows = small_excel_to_db(path, name, conn, logger, append=append)
                 total_rows += rows
-            
+
             col_count = len(get_table_columns(conn, name))
             elapsed = time.perf_counter() - start
             logger.log(f"导入完成 [{name}]: {total_rows} 行 x {col_count} 列 (耗时 {elapsed:.1f}s)")
         except Exception as e:
             logger.log(f"导入失败 [{name}]: {e}")
-    
+
     # 导入共站同覆盖表（如果存在）
     import_cog_coverage_to_db(conn, logger)
-    
+
     elapsed_total = time.perf_counter() - start_total
     logger.log(f"所有数据导入完成，总耗时 {elapsed_total:.1f}s")
-    
+
     return selected
 
 
@@ -1285,209 +1789,245 @@ def load_small_table(conn: duckdb.DuckDBPyConnection, name: str) -> pd.DataFrame
 def apply_sector_mapping(table: pd.DataFrame, mapping: pd.DataFrame, cgi_column: str, logger: GuiLogger | None = None) -> pd.DataFrame:
     """用共站同覆盖映射表更新容量表的扇区字段"""
     logger = logger or GuiLogger()
-    
+
     if mapping.empty or cgi_column not in table.columns:
         logger.log(f"跳过扇区更新（CGI列: {cgi_column}）")
         return table
-    
+
     table = table.copy()
     table[cgi_column] = table[cgi_column].astype(str)
-    
+
     # 需要映射的字段列表
-    mapping_cols = ["共站同覆盖名", "路测网格", "乡镇街道", "是否覆盖层", "小区所属区域"]
+    mapping_cols = ["共站同覆盖名", "物理站名", "路测网格", "乡镇街道", "是否覆盖层", "小区所属区域"]
     mapping_cols = [col for col in mapping_cols if col in mapping.columns]
-    
+
+    # 去重：若 mapping 中有重复 CGI，只保留第一条
+    mapping = mapping.drop_duplicates(subset=["CGI"], keep="first")
+
+    # 字段名映射：cog 列 → table 列
+    col_name_map = {
+        "共站同覆盖名": "扇区",
+        "物理站名": "物理站",
+        "路测网格": "路测网格",
+        "乡镇街道": "乡镇街道",
+        "是否覆盖层": "是否覆盖层",
+        "小区所属区域": "小区所属区域",
+    }
+
     # 遍历映射每个字段
     for col in mapping_cols:
-        # 创建映射字典
         col_mapping = dict(zip(mapping["CGI"], mapping[col]))
-        target_col = "扇区" if col == "共站同覆盖名" else col
+        target_col = col_name_map.get(col, col)
         if target_col not in table.columns:
             table[target_col] = pd.NA
         original_count = table[target_col].notna().sum()
         table[target_col] = table[cgi_column].map(col_mapping)
         updated_count = table[target_col].notna().sum()
         logger.log(f"字段 [{target_col}] 更新完成: 匹配 {updated_count} 条（新增 {updated_count - original_count} 条）")
-    
+
     return table
 
 
 def build_5g_table(conn: duckdb.DuckDBPyConnection, logger: GuiLogger | None = None) -> pd.DataFrame:
     logger = logger or GuiLogger()
-    
+
     logger.log("  [5G] 在数据库中进行日表聚合...")
-    
-    day_cols = get_table_columns(conn, "5g_day")
-    util_col_5g = "忙时小区PRB利用率" if "忙时小区PRB利用率" in day_cols else "忙时小区PRB利用率(%)"
-    
+
+    has_5g_day = table_exists(conn, "5g_day")
+
     conn.execute("DROP TABLE IF EXISTS _5g_day_agg")
     conn.execute("DROP TABLE IF EXISTS _5g_day_weekday")
     conn.execute("DROP TABLE IF EXISTS _5g_day_weekend")
-    
-    conn.execute(f"""
-        CREATE TABLE _5g_day_agg AS
-        SELECT
-            CAST(NCGI AS VARCHAR) AS NCGI,
-            AVG("{util_col_5g}") AS 自忙时利用率,
-            AVG("日RLC层上下行总流量(G)") AS 日均流量,
-            AVG("忙时上行PRB平均利用率(%)") AS 自忙时上行PRB平均利用率,
-            AVG("忙时下行PRB平均利用率(%)") AS 自忙时下行PRB平均利用率,
-            AVG("忙时PDCCH信道CCE占用率(%)") AS 自忙时PDCCH信道CCE占用率,
-            AVG("RRC连接最大数-忙时") AS 自忙时RRC连接最大数,
-            AVG("RRC连接平均数-忙时") AS 自忙时有效RRC连接平均数,
-            AVG("忙时RLC层上行业务字节数(G)") AS 自忙时上行流量,
-            AVG("忙时RLC层下行业务字节数(G)") AS 自忙时下行流量,
-            AVG("忙时RLC层上行业务字节数(G)") + AVG("忙时RLC层下行业务字节数(G)") AS 自忙时总流量,
-            AVG("RRC连接最大数-忙时") AS 自忙时有效RRC连接最大数
-        FROM "5g_day"
-        GROUP BY CAST(NCGI AS VARCHAR)
-    """)
-    
-    conn.execute(f"""
-        CREATE TABLE _5g_day_weekday AS
-        SELECT
-            CAST(NCGI AS VARCHAR) AS NCGI,
-            AVG("{util_col_5g}") AS 工作日自忙时利用率,
-            AVG("日RLC层上下行总流量(G)") AS 工作日日均流量,
-            AVG("RRC连接最大数-忙时") AS 工作日自忙时RRC连接最大数
-        FROM "5g_day"
-        WHERE CAST(extract(dayofweek FROM CAST("记录开始时间" AS TIMESTAMP)) AS INTEGER) IN (2, 3, 4, 5, 6)
-        GROUP BY CAST(NCGI AS VARCHAR)
-    """)
-    
-    conn.execute(f"""
-        CREATE TABLE _5g_day_weekend AS
-        SELECT
-            CAST(NCGI AS VARCHAR) AS NCGI,
-            AVG("{util_col_5g}") AS 周末自忙时利用率,
-            AVG("日RLC层上下行总流量(G)") AS 周末日均流量,
-            AVG("RRC连接最大数-忙时") AS 周末自忙时RRC连接最大数
-        FROM "5g_day"
-        WHERE CAST(extract(dayofweek FROM CAST("记录开始时间" AS TIMESTAMP)) AS INTEGER) IN (1, 7)
-        GROUP BY CAST(NCGI AS VARCHAR)
-    """)
-
     conn.execute("DROP TABLE IF EXISTS _5g_day_zero_stats")
-    conn.execute("""
-        CREATE TABLE _5g_day_zero_stats AS
-        WITH day_raw AS (
+
+    if has_5g_day:
+        day_cols = get_table_columns(conn, "5g_day")
+        util_col_5g = "忙时小区PRB利用率" if "忙时小区PRB利用率" in day_cols else "忙时小区PRB利用率(%)"
+
+        conn.execute(f"""
+            CREATE TABLE _5g_day_agg AS
             SELECT
                 CAST(NCGI AS VARCHAR) AS NCGI,
-                CAST("记录开始时间" AS TIMESTAMP) AS 记录开始时间,
-                COALESCE("日RLC层上下行总流量(G)", 0) AS 日流量
+                AVG(TRY_CAST("{util_col_5g}" AS DOUBLE)) AS 自忙时利用率,
+                AVG(TRY_CAST("日RLC层上下行总流量(G)" AS DOUBLE)) AS 日均流量,
+                AVG(TRY_CAST("忙时上行PRB平均利用率(%)" AS DOUBLE)) AS 自忙时上行PRB平均利用率,
+                AVG(TRY_CAST("忙时下行PRB平均利用率(%)" AS DOUBLE)) AS 自忙时下行PRB平均利用率,
+                AVG(TRY_CAST("忙时PDCCH信道CCE占用率(%)" AS DOUBLE)) AS 自忙时PDCCH信道CCE占用率,
+                AVG(TRY_CAST("RRC连接最大数-忙时" AS DOUBLE)) AS 自忙时RRC连接最大数,
+                AVG(TRY_CAST("RRC连接平均数-忙时" AS DOUBLE)) AS 自忙时有效RRC连接平均数,
+                AVG(TRY_CAST("忙时RLC层上行业务字节数(G)" AS DOUBLE)) AS 自忙时上行流量,
+                AVG(TRY_CAST("忙时RLC层下行业务字节数(G)" AS DOUBLE)) AS 自忙时下行流量,
+                AVG(TRY_CAST("忙时RLC层上行业务字节数(G)" AS DOUBLE)) + AVG(TRY_CAST("忙时RLC层下行业务字节数(G)" AS DOUBLE)) AS 自忙时总流量,
+                AVG(TRY_CAST("RRC连接最大数-忙时" AS DOUBLE)) AS 自忙时有效RRC连接最大数
             FROM "5g_day"
-        ),
-        zero_stats AS (
+            GROUP BY CAST(NCGI AS VARCHAR)
+        """)
+
+        conn.execute(f"""
+            CREATE TABLE _5g_day_weekday AS
             SELECT
-                NCGI,
-                SUM(CASE WHEN CAST(extract(dayofweek FROM 记录开始时间) AS INTEGER) IN (2, 3, 4, 5, 6)
-                         AND 日流量 = 0 THEN 1 ELSE 0 END) AS 工作日零流量天数,
-                SUM(CASE WHEN CAST(extract(dayofweek FROM 记录开始时间) AS INTEGER) IN (1, 7)
-                         AND 日流量 = 0 THEN 1 ELSE 0 END) AS 周末零流量天数
-            FROM day_raw
-            GROUP BY NCGI
-        ),
-        top3 AS (
+                CAST(NCGI AS VARCHAR) AS NCGI,
+                AVG(TRY_CAST("{util_col_5g}" AS DOUBLE)) AS 工作日自忙时利用率,
+                AVG(TRY_CAST("日RLC层上下行总流量(G)" AS DOUBLE)) AS 工作日日均流量,
+                AVG(TRY_CAST("RRC连接最大数-忙时" AS DOUBLE)) AS 工作日自忙时RRC连接最大数
+            FROM "5g_day"
+            WHERE CAST(extract(dayofweek FROM CAST("记录开始时间" AS TIMESTAMP)) AS INTEGER) IN (2, 3, 4, 5, 6)
+            GROUP BY CAST(NCGI AS VARCHAR)
+        """)
+
+        conn.execute(f"""
+            CREATE TABLE _5g_day_weekend AS
             SELECT
-                NCGI,
-                AVG(日流量) AS 最大3天流量均值
-            FROM (
+                CAST(NCGI AS VARCHAR) AS NCGI,
+                AVG(TRY_CAST("{util_col_5g}" AS DOUBLE)) AS 周末自忙时利用率,
+                AVG(TRY_CAST("日RLC层上下行总流量(G)" AS DOUBLE)) AS 周末日均流量,
+                AVG(TRY_CAST("RRC连接最大数-忙时" AS DOUBLE)) AS 周末自忙时RRC连接最大数
+            FROM "5g_day"
+            WHERE CAST(extract(dayofweek FROM CAST("记录开始时间" AS TIMESTAMP)) AS INTEGER) IN (1, 7)
+            GROUP BY CAST(NCGI AS VARCHAR)
+        """)
+
+        conn.execute("""
+            CREATE TABLE _5g_day_zero_stats AS
+            WITH day_raw AS (
+                SELECT
+                    CAST(NCGI AS VARCHAR) AS NCGI,
+                    CAST("记录开始时间" AS TIMESTAMP) AS 记录开始时间,
+                    COALESCE(TRY_CAST("日RLC层上下行总流量(G)" AS DOUBLE), 0) AS 日流量
+                FROM "5g_day"
+            ),
+            zero_stats AS (
                 SELECT
                     NCGI,
-                    日流量,
-                    ROW_NUMBER() OVER (PARTITION BY NCGI ORDER BY 日流量 DESC) AS rn
+                    SUM(CASE WHEN CAST(extract(dayofweek FROM 记录开始时间) AS INTEGER) IN (2, 3, 4, 5, 6)
+                             AND 日流量 = 0 THEN 1 ELSE 0 END) AS 工作日零流量天数,
+                    SUM(CASE WHEN CAST(extract(dayofweek FROM 记录开始时间) AS INTEGER) IN (1, 7)
+                             AND 日流量 = 0 THEN 1 ELSE 0 END) AS 周末零流量天数
                 FROM day_raw
-            ) ranked
-            WHERE rn <= 3
-            GROUP BY NCGI
-        )
-        SELECT
-            z.NCGI,
-            z.工作日零流量天数,
-            z.周末零流量天数,
-            t.最大3天流量均值
-        FROM zero_stats z
-        LEFT JOIN top3 t ON z.NCGI = t.NCGI
-    """)
-    
+                GROUP BY NCGI
+            ),
+            top3 AS (
+                SELECT
+                    NCGI,
+                    AVG(日流量) AS 最大3天流量均值
+                FROM (
+                    SELECT
+                        NCGI,
+                        日流量,
+                        ROW_NUMBER() OVER (PARTITION BY NCGI ORDER BY 日流量 DESC) AS rn
+                    FROM day_raw
+                ) ranked
+                WHERE rn <= 3
+                GROUP BY NCGI
+            )
+            SELECT
+                z.NCGI,
+                z.工作日零流量天数,
+                z.周末零流量天数,
+                t.最大3天流量均值
+            FROM zero_stats z
+            LEFT JOIN top3 t ON z.NCGI = t.NCGI
+        """)
+    else:
+        logger.log("  [5G] 日表(5g_day)不存在，跳过日表聚合")
+
     logger.log("  [5G] 在数据库中进行 MR 表聚合...")
     conn.execute("DROP TABLE IF EXISTS _5g_mr_agg")
-    conn.execute("""
-        CREATE TABLE _5g_mr_agg AS
-        SELECT
-            CAST("小区NCGI" AS VARCHAR) AS NCGI,
-            AVG("移动RSRP采样的总采样点") AS MRO移动总采样点,
-            SUM("移动RSRP采样强于-110采样点") AS MRO强于110采样点合计,
-            SUM("移动RSRP采样的总采样点") AS MRO总采样点合计,
-            AVG("移动平均TA(M)") AS 平均TA米,
-            CASE 
-                WHEN SUM("移动RSRP采样的总采样点") = 0 OR SUM("移动RSRP采样的总采样点") IS NULL THEN NULL 
-                ELSE SUM("移动RSRP采样强于-110采样点") * 1.0 / SUM("移动RSRP采样的总采样点") 
-            END AS MRO移动覆盖率
-        FROM "5g_mr"
-        GROUP BY CAST("小区NCGI" AS VARCHAR)
-    """)
-    
+    if table_exists(conn, "5g_mr"):
+        conn.execute("""
+            CREATE TABLE _5g_mr_agg AS
+            SELECT
+                CAST("小区NCGI" AS VARCHAR) AS NCGI,
+                AVG(TRY_CAST("移动RSRP采样的总采样点" AS DOUBLE)) AS MRO移动总采样点,
+                SUM(TRY_CAST("移动RSRP采样强于-110采样点" AS DOUBLE)) AS MRO强于110采样点合计,
+                SUM(TRY_CAST("移动RSRP采样的总采样点" AS DOUBLE)) AS MRO总采样点合计,
+                AVG(TRY_CAST("移动平均TA(M)" AS DOUBLE)) AS 平均TA米,
+                CASE
+                    WHEN SUM(TRY_CAST("移动RSRP采样的总采样点" AS DOUBLE)) = 0 OR SUM(TRY_CAST("移动RSRP采样的总采样点" AS DOUBLE)) IS NULL THEN NULL
+                    ELSE SUM(TRY_CAST("移动RSRP采样强于-110采样点" AS DOUBLE)) * 1.0 / SUM(TRY_CAST("移动RSRP采样的总采样点" AS DOUBLE))
+                END AS MRO移动覆盖率
+            FROM "5g_mr"
+            GROUP BY CAST("小区NCGI" AS VARCHAR)
+        """)
+    else:
+        logger.log("  [5G] MR表(5g_mr)不存在，跳过MR聚合")
+
     logger.log("  [5G] 在数据库中进行 KPI 表聚合...")
     conn.execute("DROP TABLE IF EXISTS _5g_kpi_agg")
-    conn.execute("""
-        CREATE TABLE _5g_kpi_agg AS
-        SELECT
-            CAST(NCGI AS VARCHAR) AS NCGI,
-            AVG("VoNR语音话务量") AS VoNR语音话务量
-        FROM "5g_kpi"
-        GROUP BY CAST(NCGI AS VARCHAR)
-    """)
-    
+    if table_exists(conn, "5g_kpi"):
+        conn.execute("""
+            CREATE TABLE _5g_kpi_agg AS
+            SELECT
+                CAST(NCGI AS VARCHAR) AS NCGI,
+                AVG(TRY_CAST("VoNR语音话务量" AS DOUBLE)) AS VoNR语音话务量
+            FROM "5g_kpi"
+            GROUP BY CAST(NCGI AS VARCHAR)
+        """)
+    else:
+        logger.log("  [5G] KPI表(5g_kpi)不存在，跳过KPI聚合")
+
     logger.log("  [5G] 加载周表并去重...")
     week_df = load_small_table(conn, "5g_week")
     if week_df.empty:
         return pd.DataFrame()
-    
+
     week_df["NCGI"] = week_df["NCGI"].astype(str)
     week_unique = week_df.drop_duplicates(subset=["NCGI"]).copy()
-    
+
     logger.log("  [5G] 读取聚合结果并合并...")
-    day_agg = db_to_dataframe("SELECT * FROM _5g_day_agg", conn)
-    weekday_agg = db_to_dataframe("SELECT * FROM _5g_day_weekday", conn)
-    weekend_agg = db_to_dataframe("SELECT * FROM _5g_day_weekend", conn)
-    zero_stats = db_to_dataframe("SELECT * FROM _5g_day_zero_stats", conn)
-    mr_agg = db_to_dataframe("SELECT * FROM _5g_mr_agg", conn)
-    kpi_agg = db_to_dataframe("SELECT * FROM _5g_kpi_agg", conn)
-    
+    if table_exists(conn, "_5g_day_agg"):
+        day_agg = db_to_dataframe("SELECT * FROM _5g_day_agg", conn)
+        weekday_agg = db_to_dataframe("SELECT * FROM _5g_day_weekday", conn)
+        weekend_agg = db_to_dataframe("SELECT * FROM _5g_day_weekend", conn)
+        zero_stats = db_to_dataframe("SELECT * FROM _5g_day_zero_stats", conn)
+    else:
+        logger.log("  [5G] 日表聚合不存在，使用空日表数据")
+        day_agg = pd.DataFrame(columns=["NCGI"])
+        weekday_agg = pd.DataFrame(columns=["NCGI"])
+        weekend_agg = pd.DataFrame(columns=["NCGI"])
+        zero_stats = pd.DataFrame(columns=["NCGI"])
+    if table_exists(conn, "_5g_mr_agg"):
+        mr_agg = db_to_dataframe("SELECT * FROM _5g_mr_agg", conn)
+    else:
+        mr_agg = pd.DataFrame(columns=["NCGI"])
+    if table_exists(conn, "_5g_kpi_agg"):
+        kpi_agg = db_to_dataframe("SELECT * FROM _5g_kpi_agg", conn)
+    else:
+        kpi_agg = pd.DataFrame(columns=["NCGI"])
+
     result = week_unique.merge(day_agg, on="NCGI", how="left")
     result = result.merge(weekday_agg, on="NCGI", how="left")
     result = result.merge(weekend_agg, on="NCGI", how="left")
     result = result.merge(zero_stats, on="NCGI", how="left")
     result = result.merge(mr_agg, on="NCGI", how="left")
     result = result.merge(kpi_agg, on="NCGI", how="left")
-    
+
     logger.log("  [5G] 计算流量系数、长尾分类等派生字段...")
-    
+
     avg_traffic = result["日均流量"].mean(skipna=True)
     result["流量系数"] = result["日均流量"] / avg_traffic if pd.notna(avg_traffic) and avg_traffic != 0 else pd.NA
     tail_threshold = result["日均流量"].quantile(0.3)
     result["流量排名升序"] = result["日均流量"].rank(method="min", ascending=True)
-    
+
     is_na_traffic = result["日均流量"].isna()
     is_tail = (result["日均流量"] <= tail_threshold) & ~is_na_traffic
     is_zero = result["日均流量"] == 0
     is_high_util = result["自忙时利用率"].notna() & (result["自忙时利用率"] > 20)
-    
+
     result["长尾小区"] = pd.NA
     result.loc[is_tail & is_zero, "长尾小区"] = "长尾具体原因待确认"
     result.loc[is_tail & ~is_zero & is_high_util, "长尾小区"] = "长尾待观察"
     result.loc[is_tail & ~is_zero & ~is_high_util, "长尾小区"] = "长尾需处理"
-    
+
     result["流量是否正常"] = pd.NA
     result.loc[result["流量系数"] < 0.2, "流量是否正常"] = "低流量系数小区"
     result.loc[(result["流量系数"] >= 0.2) & (result["流量系数"] < 3), "流量是否正常"] = "正常"
     result.loc[result["流量系数"] >= 3, "流量是否正常"] = "高流量系数小区"
-    
+
     result["负荷情况"] = pd.NA
     result.loc[result["自忙时利用率"].notna() & (result["自忙时利用率"] > 80), "负荷情况"] = "负荷高小区"
     result.loc[result["自忙时利用率"].isna() | (result["自忙时利用率"] <= 80), "负荷情况"] = "正常"
-    
+
     result["记录开始时间"] = first_existing(result, ["记录开始时间"])
     result["记录结束时间"] = first_existing(result, ["记录结束时间"])
     result["地市"] = first_existing(result, ["地市"])
@@ -1501,7 +2041,7 @@ def build_5g_table(conn: duckdb.DuckDBPyConnection, logger: GuiLogger | None = N
     result["是否高负荷待扩容小区"] = first_existing(result, ["是否高负荷待扩容小区", "是否高负荷"])
     result["是否全省高负荷预警小区（省内口径）"] = pd.NA
     result["物理站"] = first_existing(result, ["站点名称"])
-    
+
     ordered_columns = [
         "记录开始时间", "记录结束时间", "地市", "NCGI", "网元状态", "小区名称", "扇区", "band",
         "覆盖类型", "场景 V容量表", "TYPE", "流量是否正常", "负荷情况", "流量排名升序", "长尾小区",
@@ -1520,160 +2060,178 @@ def build_5g_table(conn: duckdb.DuckDBPyConnection, logger: GuiLogger | None = N
 
 def build_4g_table(conn: duckdb.DuckDBPyConnection, logger: GuiLogger | None = None) -> pd.DataFrame:
     logger = logger or GuiLogger()
-    
+
     logger.log("  [4G] 在数据库中进行日表聚合...")
-    
+
     conn.execute("DROP TABLE IF EXISTS _4g_day_temp")
     conn.execute("DROP TABLE IF EXISTS _4g_day_agg")
     conn.execute("DROP TABLE IF EXISTS _4g_day_weekday")
     conn.execute("DROP TABLE IF EXISTS _4g_day_weekend")
-    
-    conn.execute("""
-        CREATE TABLE _4g_day_temp AS
-        SELECT
-            CAST(CGI AS VARCHAR) AS CGI,
-            CASE WHEN "自忙时上行PRB平均利用率" > "自忙时下行PRB平均利用率" THEN "自忙时上行PRB平均利用率" ELSE "自忙时下行PRB平均利用率" END AS 自忙时利用率,
-            "日4G流量（GB）",
-            "自忙时上行PRB平均利用率",
-            "自忙时下行PRB平均利用率",
-            "自忙时PDCCH信道CCE占用率",
-            "自忙时有效RRC连接最大数",
-            "自忙时RRC连接最大数",
-            "自忙时有效RRC连接平均数",
-            "自忙时空口上行业务字节数",
-            "自忙时空口下行业务字节数",
-            "记录开始时间"
-        FROM "4g_day"
-    """)
-    
-    conn.execute("""
-        CREATE TABLE _4g_day_agg AS
-        SELECT
-            CGI,
-            AVG(自忙时利用率) AS 自忙时利用率,
-            AVG("日4G流量（GB）") AS 日均流量,
-            AVG("自忙时上行PRB平均利用率") AS 自忙时上行PRB平均利用率,
-            AVG("自忙时下行PRB平均利用率") AS 自忙时下行PRB平均利用率,
-            AVG("自忙时PDCCH信道CCE占用率") AS 自忙时PDCCH信道CCE占用率,
-            AVG("自忙时有效RRC连接最大数") AS 自忙时有效RRC连接最大数,
-            AVG("自忙时RRC连接最大数") AS 自忙时RRC连接最大数,
-            AVG("自忙时有效RRC连接平均数") AS 自忙时有效RRC连接平均数,
-            AVG("自忙时空口上行业务字节数") AS 自忙时上行流量,
-            AVG("自忙时空口下行业务字节数") AS 自忙时下行流量,
-            AVG("自忙时空口上行业务字节数") + AVG("自忙时空口下行业务字节数") AS 自忙时总流量
-        FROM _4g_day_temp
-        GROUP BY CGI
-    """)
-    
-    conn.execute("""
-        CREATE TABLE _4g_day_weekday AS
-        SELECT
-            CGI,
-            AVG(自忙时利用率) AS 工作日自忙时利用率,
-            AVG("日4G流量（GB）") AS 工作日日均流量,
-            AVG("自忙时RRC连接最大数") AS 工作日自忙时RRC连接最大数
-        FROM _4g_day_temp
-        WHERE CAST(extract(dayofweek FROM CAST("记录开始时间" AS TIMESTAMP)) AS INTEGER) IN (2, 3, 4, 5, 6)
-        GROUP BY CGI
-    """)
-    
-    conn.execute("""
-        CREATE TABLE _4g_day_weekend AS
-        SELECT
-            CGI,
-            AVG(自忙时利用率) AS 周末自忙时利用率,
-            AVG("日4G流量（GB）") AS 周末日均流量,
-            AVG("自忙时RRC连接最大数") AS 周末自忙时RRC连接最大数
-        FROM _4g_day_temp
-        WHERE CAST(extract(dayofweek FROM CAST("记录开始时间" AS TIMESTAMP)) AS INTEGER) IN (1, 7)
-        GROUP BY CGI
-    """)
-    
+
+    if not table_exists(conn, "4g_day"):
+        logger.log("  [4G] 日表(4g_day)不存在，跳过日表聚合，仅使用周表数据")
+    else:
+        # 使用 TRY_CAST 防御性转换，避免空字符串导致推断为 VARCHAR
+        conn.execute("""
+            CREATE TABLE _4g_day_temp AS
+            SELECT
+                CAST(CGI AS VARCHAR) AS CGI,
+                CASE WHEN TRY_CAST("自忙时上行PRB平均利用率" AS DOUBLE) > TRY_CAST("自忙时下行PRB平均利用率" AS DOUBLE)
+                     THEN TRY_CAST("自忙时上行PRB平均利用率" AS DOUBLE)
+                     ELSE TRY_CAST("自忙时下行PRB平均利用率" AS DOUBLE) END AS 自忙时利用率,
+                TRY_CAST("日4G流量（GB）" AS DOUBLE) AS "日4G流量（GB）",
+                TRY_CAST("自忙时上行PRB平均利用率" AS DOUBLE) AS "自忙时上行PRB平均利用率",
+                TRY_CAST("自忙时下行PRB平均利用率" AS DOUBLE) AS "自忙时下行PRB平均利用率",
+                TRY_CAST("自忙时PDCCH信道CCE占用率" AS DOUBLE) AS "自忙时PDCCH信道CCE占用率",
+                TRY_CAST("自忙时有效RRC连接最大数" AS DOUBLE) AS "自忙时有效RRC连接最大数",
+                TRY_CAST("自忙时RRC连接最大数" AS DOUBLE) AS "自忙时RRC连接最大数",
+                TRY_CAST("自忙时有效RRC连接平均数" AS DOUBLE) AS "自忙时有效RRC连接平均数",
+                TRY_CAST("自忙时空口上行业务字节数" AS DOUBLE) AS "自忙时空口上行业务字节数",
+                TRY_CAST("自忙时空口下行业务字节数" AS DOUBLE) AS "自忙时空口下行业务字节数",
+                "记录开始时间"
+            FROM "4g_day"
+        """)
+
+        conn.execute("""
+            CREATE TABLE _4g_day_agg AS
+            SELECT
+                CGI,
+                AVG(自忙时利用率) AS 自忙时利用率,
+                AVG("日4G流量（GB）") AS 日均流量,
+                AVG("自忙时上行PRB平均利用率") AS 自忙时上行PRB平均利用率,
+                AVG("自忙时下行PRB平均利用率") AS 自忙时下行PRB平均利用率,
+                AVG("自忙时PDCCH信道CCE占用率") AS 自忙时PDCCH信道CCE占用率,
+                AVG("自忙时有效RRC连接最大数") AS 自忙时有效RRC连接最大数,
+                AVG("自忙时RRC连接最大数") AS 自忙时RRC连接最大数,
+                AVG("自忙时有效RRC连接平均数") AS 自忙时有效RRC连接平均数,
+                AVG("自忙时空口上行业务字节数") AS 自忙时上行流量,
+                AVG("自忙时空口下行业务字节数") AS 自忙时下行流量,
+                AVG("自忙时空口上行业务字节数") + AVG("自忙时空口下行业务字节数") AS 自忙时总流量
+            FROM _4g_day_temp
+            GROUP BY CGI
+        """)
+
+        conn.execute("""
+            CREATE TABLE _4g_day_weekday AS
+            SELECT
+                CGI,
+                AVG(自忙时利用率) AS 工作日自忙时利用率,
+                AVG("日4G流量（GB）") AS 工作日日均流量,
+                AVG("自忙时RRC连接最大数") AS 工作日自忙时RRC连接最大数
+            FROM _4g_day_temp
+            WHERE CAST(extract(dayofweek FROM CAST("记录开始时间" AS TIMESTAMP)) AS INTEGER) IN (2, 3, 4, 5, 6)
+            GROUP BY CGI
+        """)
+
+        conn.execute("""
+            CREATE TABLE _4g_day_weekend AS
+            SELECT
+                CGI,
+                AVG(自忙时利用率) AS 周末自忙时利用率,
+                AVG("日4G流量（GB）") AS 周末日均流量,
+                AVG("自忙时RRC连接最大数") AS 周末自忙时RRC连接最大数
+            FROM _4g_day_temp
+            WHERE CAST(extract(dayofweek FROM CAST("记录开始时间" AS TIMESTAMP)) AS INTEGER) IN (1, 7)
+            GROUP BY CGI
+        """)
+
     logger.log("  [4G] 在数据库中进行 MR 表聚合...")
     conn.execute("DROP TABLE IF EXISTS _4g_mr_agg")
-    conn.execute("""
-        CREATE TABLE _4g_mr_agg AS
-        SELECT
-            CAST(cgi AS VARCHAR) AS CGI,
-            AVG("MRO移动总采样点") AS MRO移动总采样点,
-            SUM("MRO移动大于等于负110DBM的采样点数") AS MRO有效点合计,
-            SUM("MRO移动总采样点") AS MRO总采样点合计,
-            AVG("平均TA") AS 平均TA米,
-            CASE 
-                WHEN SUM("MRO移动总采样点") = 0 OR SUM("MRO移动总采样点") IS NULL THEN NULL 
-                ELSE SUM("MRO移动大于等于负110DBM的采样点数") * 1.0 / SUM("MRO移动总采样点") 
-            END AS MRO移动覆盖率
-        FROM "4g_mr"
-        GROUP BY CAST(cgi AS VARCHAR)
-    """)
-    
+    if table_exists(conn, "4g_mr"):
+        conn.execute("""
+            CREATE TABLE _4g_mr_agg AS
+            SELECT
+                CAST(cgi AS VARCHAR) AS CGI,
+                AVG(TRY_CAST("MRO移动总采样点" AS DOUBLE)) AS MRO移动总采样点,
+                SUM(TRY_CAST("MRO移动大于等于负110DBM的采样点数" AS DOUBLE)) AS MRO有效点合计,
+                SUM(TRY_CAST("MRO移动总采样点" AS DOUBLE)) AS MRO总采样点合计,
+                AVG(TRY_CAST("平均TA" AS DOUBLE)) AS 平均TA米,
+                CASE
+                    WHEN SUM(TRY_CAST("MRO移动总采样点" AS DOUBLE)) = 0 OR SUM(TRY_CAST("MRO移动总采样点" AS DOUBLE)) IS NULL THEN NULL
+                    ELSE SUM(TRY_CAST("MRO移动大于等于负110DBM的采样点数" AS DOUBLE)) * 1.0 / SUM(TRY_CAST("MRO移动总采样点" AS DOUBLE))
+                END AS MRO移动覆盖率
+            FROM "4g_mr"
+            GROUP BY CAST(cgi AS VARCHAR)
+        """)
+    else:
+        logger.log("  [4G] MR表(4g_mr)不存在，跳过MR聚合")
+
     logger.log("  [4G] 在数据库中进行周表指标聚合...")
     conn.execute("DROP TABLE IF EXISTS _4g_week_metrics")
     conn.execute("""
         CREATE TABLE _4g_week_metrics AS
         SELECT
             CAST(CGI AS VARCHAR) AS CGI,
-            AVG("自忙时上行PRB平均利用率") AS week_上行PRB,
-            AVG("自忙时下行PRB平均利用率") AS week_下行PRB,
-            AVG("自忙时PDCCH信道CCE占用率") AS week_PDCCH
+            AVG(TRY_CAST("自忙时上行PRB平均利用率" AS DOUBLE)) AS week_上行PRB,
+            AVG(TRY_CAST("自忙时下行PRB平均利用率" AS DOUBLE)) AS week_下行PRB,
+            AVG(TRY_CAST("自忙时PDCCH信道CCE占用率" AS DOUBLE)) AS week_PDCCH
         FROM "4g_week"
         GROUP BY CAST(CGI AS VARCHAR)
     """)
-    
+
     logger.log("  [4G] 加载周表并去重...")
     week_df = load_small_table(conn, "4g_week")
     if week_df.empty:
         return pd.DataFrame()
-    
+
     week_df["CGI"] = week_df["CGI"].astype(str)
     week_unique = week_df.drop_duplicates(subset=["CGI"]).copy()
-    
+
     logger.log("  [4G] 读取聚合结果并合并...")
-    day_agg = db_to_dataframe("SELECT * FROM _4g_day_agg", conn)
-    weekday_agg = db_to_dataframe("SELECT * FROM _4g_day_weekday", conn)
-    weekend_agg = db_to_dataframe("SELECT * FROM _4g_day_weekend", conn)
-    mr_agg = db_to_dataframe("SELECT * FROM _4g_mr_agg", conn)
+    if table_exists(conn, "_4g_day_agg"):
+        day_agg = db_to_dataframe("SELECT * FROM _4g_day_agg", conn)
+        weekday_agg = db_to_dataframe("SELECT * FROM _4g_day_weekday", conn)
+        weekend_agg = db_to_dataframe("SELECT * FROM _4g_day_weekend", conn)
+    else:
+        logger.log("  [4G] 日表聚合不存在，使用空日表数据")
+        day_agg = pd.DataFrame(columns=["CGI"])
+        weekday_agg = pd.DataFrame(columns=["CGI"])
+        weekend_agg = pd.DataFrame(columns=["CGI"])
+    if table_exists(conn, "_4g_mr_agg"):
+        mr_agg = db_to_dataframe("SELECT * FROM _4g_mr_agg", conn)
+    else:
+        mr_agg = pd.DataFrame(columns=["CGI"])
     week_metrics = db_to_dataframe("SELECT * FROM _4g_week_metrics", conn)
-    
+
     result = week_unique.merge(day_agg, on="CGI", how="left")
     result = result.merge(week_metrics, on="CGI", how="left")
     result = result.merge(weekday_agg, on="CGI", how="left")
     result = result.merge(weekend_agg, on="CGI", how="left")
     result = result.merge(mr_agg, on="CGI", how="left")
-    
+
     logger.log("  [4G] 计算流量系数、长尾分类等派生字段...")
-    
+
     avg_traffic = result["日均流量"].mean(skipna=True)
     result["流量系数"] = result["日均流量"] / avg_traffic if pd.notna(avg_traffic) and avg_traffic != 0 else pd.NA
     result["流量排名升序"] = result["日均流量"].rank(method="min", ascending=True)
     tail_threshold = result["日均流量"].quantile(0.3)
-    
+
     result["流量是否正常"] = pd.NA
     result.loc[result["流量系数"] < 0.2, "流量是否正常"] = "低流量系数小区"
     result.loc[(result["流量系数"] >= 0.2) & (result["流量系数"] < 3), "流量是否正常"] = "正常"
     result.loc[result["流量系数"] >= 3, "流量是否正常"] = "高流量系数小区"
-    
+
     name = result["小区名称"].fillna("").astype(str)
     is_rdc_dc = name.str.contains("RDC|DC-|RGS|GS-", regex=True, na=False)
     is_rd = name.str.contains("RD-", regex=True, na=False)
-    
+
     util = result["自忙时利用率"]
     result["负荷情况"] = "正常"
     result.loc[is_rdc_dc & (util > 90), "负荷情况"] = "负荷高小区"
     result.loc[is_rd & (util > 70) & ~is_rdc_dc, "负荷情况"] = "负荷高小区"
     result.loc[~is_rdc_dc & ~is_rd & (util > 50), "负荷情况"] = "负荷高小区"
     result.loc[util.isna(), "负荷情况"] = "正常"
-    
+
     is_na_traffic = result["日均流量"].isna()
     is_tail = (result["日均流量"] <= tail_threshold) & ~is_na_traffic
     is_zero = result["日均流量"] == 0
     is_high_util = result["自忙时利用率"].notna() & (result["自忙时利用率"] > 20)
-    
+
     result["长尾小区"] = pd.NA
     result.loc[is_tail & is_zero, "长尾小区"] = "具体原因待确认"
     result.loc[is_tail & ~is_zero & is_high_util, "长尾小区"] = "长尾待观察"
     result.loc[is_tail & ~is_zero & ~is_high_util, "长尾小区"] = "长尾需处理"
-    
+
     result["记录开始时间"] = first_existing(result, ["记录开始时间"])
     result["记录结束时间"] = first_existing(result, ["记录结束时间"])
     result["地市"] = first_existing(result, ["所属地市"])
@@ -1687,13 +2245,25 @@ def build_4g_table(conn: duckdb.DuckDBPyConnection, logger: GuiLogger | None = N
     result["是否高负荷待扩容小区"] = first_existing(result, ["是否高负荷待扩容小区"])
     result["是否全省高负荷预警小区（省内口径）"] = first_existing(result, ["是否高流量预警小区"])
     result["物理站"] = first_existing(result, ["所属站点名称"])
-    
+
     if "week_上行PRB" in result.columns:
         if "自忙时上行PRB平均利用率_y" in result.columns:
             result["自忙时上行PRB平均利用率"] = result["自忙时上行PRB平均利用率_y"].combine_first(result["week_上行PRB"])
         else:
             result["自忙时上行PRB平均利用率"] = result["自忙时上行PRB平均利用率"].combine_first(result["week_上行PRB"])
-    
+
+    if "week_下行PRB" in result.columns:
+        if "自忙时下行PRB平均利用率_y" in result.columns:
+            result["自忙时下行PRB平均利用率"] = result["自忙时下行PRB平均利用率_y"].combine_first(result["week_下行PRB"])
+        else:
+            result["自忙时下行PRB平均利用率"] = result["自忙时下行PRB平均利用率"].combine_first(result["week_下行PRB"])
+
+    if "week_PDCCH" in result.columns:
+        if "自忙时PDCCH信道CCE占用率_y" in result.columns:
+            result["自忙时PDCCH信道CCE占用率"] = result["自忙时PDCCH信道CCE占用率_y"].combine_first(result["week_PDCCH"])
+        else:
+            result["自忙时PDCCH信道CCE占用率"] = result["自忙时PDCCH信道CCE占用率"].combine_first(result["week_PDCCH"])
+
     ordered_columns = [
         "记录开始时间", "记录结束时间", "地市", "CGI", "网元状态", "小区名称", "扇区", "band",
         "场景 V容量表", "TYPE", "流量是否正常", "负荷情况", "流量排名升序", "长尾小区",
@@ -1966,6 +2536,13 @@ def build_low_efficiency_table(
                         if after_util < 40 and after_traffic < 20:
                             low_reason = "拆除后扇区等效利用率<40% 且 拆除后扇区等效单载波流量<20GB"
                             impact = float(after_util) + float(after_traffic)
+                        else:
+                            parts = []
+                            if float(after_util) >= 40:
+                                parts.append(f"拆除后扇区等效利用率{after_util}%≥40%")
+                            if float(after_traffic) >= 20:
+                                parts.append(f"拆除后扇区等效单载波流量{after_traffic}GB≥20GB")
+                            low_reason = "不满足减容条件: " + "; ".join(parts)
 
                 base_row = {
                     "网络制式": "4G",
@@ -2045,6 +2622,221 @@ def build_low_efficiency_table(
     summary = pd.DataFrame(summary_rows)
     return df5, df4, df4_full, summary
 
+STATION_BAND_EVAL_COLUMNS = [
+    "物理站",
+    "频段",
+    "频段内小区数",
+    "等效载波权重",
+    "频段等效利用率(%)",
+    "频段等效单载波流量(GB)",
+    "物理站总等效载波权重(拆除前)",
+    "物理站等效利用率_拆除前(%)",
+    "物理站等效单载波流量_拆除前(GB)",
+    "拆除后物理站等效载波权重",
+    "拆除后物理站等效利用率(<40%)",
+    "拆除后物理站等效单载波流量(<20GB)",
+    "能否减容",
+    "低效原因",
+    "物理站含所有4G频段",
+    "地市",
+]
+
+
+def build_station_band_evaluation(
+    table_4g: pd.DataFrame,
+) -> pd.DataFrame:
+    """按物理站+频段评估减容可行性。
+
+    对于每个物理站，如果有多套4G频段，评估减掉其中一套频段后
+    剩余频段能否承载原有流量。等效载波计算方式与扇区评估一致。
+
+    Parameters
+    ----------
+    table_4g : 4G 容量表 DataFrame，需包含 物理站、band、自忙时利用率、日均流量 列。
+
+    Returns
+    -------
+    评估结果 DataFrame。
+    """
+    if table_4g is None or table_4g.empty:
+        return pd.DataFrame(columns=STATION_BAND_EVAL_COLUMNS)
+
+    # 复制并标准化频段
+    work = table_4g.copy()
+    work["_std_band"] = work["band"].map(_normalize_capacity_band)
+    work = work[work["_std_band"].astype(bool)].copy()
+
+    if work.empty:
+        return pd.DataFrame(columns=STATION_BAND_EVAL_COLUMNS)
+
+    # Stage 1: 按 (物理站, 频段) 聚合，计算每个频段的等效载波权重/利用率/流量 + 扇区集合
+    band_records: list[dict[str, object]] = []
+    for (station, band), group in work.groupby(
+        [work["物理站"].map(normalize_text), work["_std_band"]], dropna=False
+    ):
+        if not station:
+            continue
+        station = normalize_text(station)
+        band_denom = 0.0
+        band_ps = 0.0
+        band_traffic = 0.0
+        cell_count = 0
+        city = ""
+        band_sectors: set[str] = set()
+
+        for _, srow in group.iterrows():
+            m = _resolve_lte_band_m(srow)
+            if m is None:
+                continue
+            util = pd.to_numeric(srow.get("自忙时利用率"), errors="coerce")
+            traffic = pd.to_numeric(srow.get("日均流量"), errors="coerce")
+            if pd.notna(util):
+                band_ps += m * util
+            if pd.notna(traffic):
+                band_traffic += traffic
+            band_denom += m
+            cell_count += 1
+            if not city:
+                city = normalize_text(srow.get("地市")) or ""
+            # 收集该小区所属扇区
+            sec = normalize_text(srow.get("扇区"))
+            if sec:
+                band_sectors.add(sec)
+
+        if band_denom == 0:
+            continue
+
+        band_records.append({
+            "物理站": station,
+            "频段": band,
+            "频段内小区数": cell_count,
+            "等效载波权重": round(band_denom, 2),
+            "频段等效利用率(%)": round(float(band_ps / band_denom), 2),
+            "频段等效单载波流量(GB)": round(float(band_traffic / band_denom), 2),
+            "_band_denom": band_denom,
+            "_band_ps": band_ps,
+            "_band_traffic": band_traffic,
+            "_band_sectors": band_sectors,
+            "地市": city,
+        })
+
+    if not band_records:
+        return pd.DataFrame(columns=STATION_BAND_EVAL_COLUMNS)
+
+    bands_df = pd.DataFrame(band_records)
+
+    # Stage 2: 按物理站汇总，计算站级总等效载波
+    station_agg = bands_df.groupby("物理站").agg(
+        station_denom=("_band_denom", "sum"),
+        station_ps=("_band_ps", "sum"),
+        station_traffic=("_band_traffic", "sum"),
+        station_band_count=("频段", "count"),
+        station_all_bands=("频段", lambda x: "/".join(sorted(x))),
+    ).reset_index()
+
+    # 合并
+    merged = bands_df.merge(station_agg, on="物理站", how="left")
+
+    # Stage 3: 评估拆除每套频段后的影响
+    # 先按物理站预计算：每个站的每个频段的扇区集合
+    station_band_sectors: dict[str, dict[str, set[str]]] = {}
+    for rec in band_records:
+        station = rec["物理站"]
+        if station not in station_band_sectors:
+            station_band_sectors[station] = {}
+        station_band_sectors[station][rec["频段"]] = rec.get("_band_sectors", set())
+
+    rows: list[dict[str, object]] = []
+    for _, rec in merged.iterrows():
+        station = rec["物理站"]
+        band = rec["频段"]
+        station_denom = float(rec["station_denom"])
+        station_ps = float(rec["station_ps"])
+        station_traffic = float(rec["station_traffic"])
+        band_denom = float(rec["_band_denom"])
+        band_ps = float(rec["_band_ps"])
+        band_traffic = float(rec["_band_traffic"])
+        band_count = int(rec["station_band_count"])
+        band_sectors: set[str] = rec.get("_band_sectors", set())
+
+        # 站级拆除前指标
+        before_util = round(float(station_ps / station_denom), 2) if station_denom > 0 else pd.NA
+        before_traffic = round(float(station_traffic / station_denom), 2) if station_denom > 0 else pd.NA
+
+        # 拆除后指标
+        after_util: object = pd.NA
+        after_traffic: object = pd.NA
+        after_denom: object = pd.NA
+        low_reason = ""
+        can_reduce = False  # 明确标志
+
+        # 1) 先检查扇区覆盖空洞：拆除该频段后，是否存在仅由该频段覆盖的扇区
+        other_bands_sectors: set[str] = set()
+        station_bands = station_band_sectors.get(station, {})
+        for other_band, other_sectors in station_bands.items():
+            if other_band != band:
+                other_bands_sectors |= other_sectors
+        orphaned_sectors = band_sectors - other_bands_sectors
+
+        if orphaned_sectors:
+            orphaned_list = sorted(orphaned_sectors)
+            low_reason = f"拆除后扇区{','.join(orphaned_list)}缺乏覆盖，不能减容"
+        elif band_count <= 1:
+            low_reason = "物理站仅有一套频段，无法评估拆除"
+        elif station_denom <= band_denom:
+            low_reason = "拆除后无剩余等效载波，无法评估"
+        else:
+            # 2) 等效载波评估
+            new_denom = station_denom - band_denom
+            new_ps = station_ps - band_ps
+            new_traffic = station_traffic - band_traffic
+            if new_denom > 0:
+                after_util = round(float(new_ps / new_denom), 2)
+                after_traffic = round(float(new_traffic / new_denom), 2)
+                after_denom = round(new_denom, 2)
+                if float(after_util) < 40 and float(after_traffic) < 20:
+                    low_reason = "拆除后物理站等效利用率<40% 且 等效单载波流量<20GB"
+                    can_reduce = True
+                else:
+                    # 不满足阈值时也记录具体指标
+                    parts = []
+                    if float(after_util) >= 40:
+                        parts.append(f"拆除后等效利用率{after_util}%≥40%")
+                    if float(after_traffic) >= 20:
+                        parts.append(f"等效单载波流量{after_traffic}GB≥20GB")
+                    low_reason = "不满足减容条件: " + "; ".join(parts)
+
+        rows.append({
+            "物理站": station,
+            "频段": band,
+            "频段内小区数": rec["频段内小区数"],
+            "等效载波权重": rec["等效载波权重"],
+            "频段等效利用率(%)": rec["频段等效利用率(%)"],
+            "频段等效单载波流量(GB)": rec["频段等效单载波流量(GB)"],
+            "物理站总等效载波权重(拆除前)": round(station_denom, 2),
+            "物理站等效利用率_拆除前(%)": before_util,
+            "物理站等效单载波流量_拆除前(GB)": before_traffic,
+            "拆除后物理站等效载波权重": after_denom,
+            "拆除后物理站等效利用率(<40%)": after_util,
+            "拆除后物理站等效单载波流量(<20GB)": after_traffic,
+            "能否减容": "是" if can_reduce else "否",
+            "低效原因": low_reason,
+            "物理站含所有4G频段": rec["station_all_bands"],
+            "地市": rec["地市"],
+        })
+
+    result = pd.DataFrame(rows, columns=STATION_BAND_EVAL_COLUMNS)
+    if not result.empty:
+        # 可减容的排前面，再按拆除后利用率升序
+        result["_sort_key"] = result["能否减容"].map({"是": 0, "否": 1})
+        result = result.sort_values(
+            by=["_sort_key", "拆除后物理站等效利用率(<40%)", "拆除后物理站等效单载波流量(<20GB)"],
+            ascending=[True, True, True],
+        )
+        result = result.drop(columns=["_sort_key"])
+    return result
+
+
 LOWEFF_OUTPUT_PATH = BASE_DIR / "低效小区结果.xlsx"
 
 
@@ -2117,6 +2909,10 @@ def run_pipeline(
             f"低效小区结果生成完成，5G {len(loweff_5g)} 条，4G {len(loweff_4g)} 条，"
             f"全量4G评估 {len(loweff_4g_full)} 条"
         )
+        logger.log("开始生成物理站+频段减容评估")
+        station_band_eval = build_station_band_evaluation(table_4g)
+        able_count = int((station_band_eval["能否减容"] == "是").sum()) if not station_band_eval.empty else 0
+        logger.log(f"物理站+频段评估完成，共 {len(station_band_eval)} 条，可减容 {able_count} 个频段")
         logger.log(f"开始写出文件: {output_paths['5g'].name}")
         start = time.perf_counter(); table_5g.to_excel(output_paths["5g"], index=False); elapsed = time.perf_counter() - start
         progress.update(88, f"已生成: {output_paths['5g'].name}"); logger.log(f"写出 {output_paths['5g'].name} 完成 (耗时 {elapsed:.1f}s)")
@@ -2130,6 +2926,7 @@ def run_pipeline(
             loweff_5g.to_excel(writer, index=False, sheet_name="5G低效明细")
             loweff_4g.to_excel(writer, index=False, sheet_name="4G低效明细")
             loweff_4g_full.to_excel(writer, index=False, sheet_name="全量4G小区评估")
+            station_band_eval.to_excel(writer, index=False, sheet_name="物理站+频段评估")
             loweff_summary.to_excel(writer, index=False, sheet_name="统计汇总")
         logger.log(f"写出 {LOWEFF_OUTPUT_PATH.name} 完成")
         progress.update(100, f"已生成: {LOWEFF_OUTPUT_PATH.name}")
@@ -2379,7 +3176,7 @@ class PhysicalTableAggregator:
         """
         if data_dir is None:
             data_dir = DATA_DIR
-        
+
         self.init_database()
 
         print("=" * 50)
@@ -2390,7 +3187,7 @@ class PhysicalTableAggregator:
         # 使用模式匹配查找工参文件（类似容量表的方式）
         nr_files = sorted(data_dir.glob("*_nr_*.xlsx"))
         lte_files = sorted(data_dir.glob("*_lte_*.xlsx"))
-        
+
         # 过滤临时文件
         nr_files = [f for f in nr_files if not f.name.startswith(".~")]
         lte_files = [f for f in lte_files if not f.name.startswith(".~")]
@@ -2409,18 +3206,18 @@ class PhysicalTableAggregator:
 
         all_cells = pd.concat(frames, ignore_index=True) if frames else pd.DataFrame()
         print(f"\n共读取 {len(all_cells)} 条小区数据")
-        
+
         if all_cells.empty:
             print("警告: 未读取到任何小区数据，请检查数据目录")
             return all_cells
-        
+
         # 按CGI去重，保留第一个出现的记录
         before_dedup = len(all_cells)
         all_cells = all_cells.drop_duplicates(subset=["CGI"], keep="first")
         after_dedup = len(all_cells)
         if before_dedup != after_dedup:
             print(f"去重后剩余 {after_dedup} 条记录（去除 {before_dedup - after_dedup} 条重复CGI）")
-            
+
         # 使用 DuckDB 方式写入数据 - 直接注册 DataFrame 为临时表
         self.conn.register("df_cells", all_cells)
         self.conn.execute("""
@@ -2455,7 +3252,7 @@ class PhysicalTableAggregator:
         print("\n从统一数据库加载共站同覆盖小区表...")
         cc_df = pd.DataFrame()
         cc_lookup = {}
-        
+
         try:
             with CogCoverageManager() as mgr:
                 cc_count = mgr.get_count()
@@ -2465,11 +3262,11 @@ class PhysicalTableAggregator:
                     print(f"已从统一数据库加载共站同覆盖小区表: {cc_count} 条记录")
                 else:
                     print("警告: 统一数据库中共站同覆盖表为空，请通过管理界面导入")
-                    
+
                     # 尝试从Excel文件加载作为备用
                     cc_files = sorted(data_dir.glob("共站同覆盖小区*.xlsx"))
                     cc_files = [f for f in cc_files if not f.name.startswith(".~")]
-                    
+
                     if cc_files:
                         cc_path = cc_files[0]
                         cc_df = read_common_coverage(cc_path)
@@ -2481,7 +3278,7 @@ class PhysicalTableAggregator:
             print("尝试从Excel文件加载...")
             cc_files = sorted(data_dir.glob("共站同覆盖小区*.xlsx"))
             cc_files = [f for f in cc_files if not f.name.startswith(".~")]
-            
+
             if cc_files:
                 cc_path = cc_files[0]
                 cc_df = read_common_coverage(cc_path)
@@ -2699,41 +3496,41 @@ def run_physical_table_pipeline(
     """
     logger = GuiLogger(log_callback)
     progress = GuiProgress(progress_callback, logger)
-    
+
     if not PHYSICAL_TABLE_AVAILABLE:
         logger.log("错误: 物理表模块未安装，无法运行物理表功能")
         return None
-    
+
     logger.log("=" * 50)
     logger.log("物理表汇总流程启动")
     logger.log("=" * 50)
     logger.log(f"数据目录: {base_dir}")
-    
+
     if output_path is None:
         output_path = os.path.join(base_dir, "物理表汇总结果.xlsx")
     logger.log(f"输出文件: {output_path}")
-    
+
     progress.update(5, "初始化物理表汇总器...")
-    
+
     start_time = time.time()
     aggregator = PhysicalTableAggregator(base_dir)
-    
+
     try:
         progress.update(20, "读取并汇总数据...")
         # 传入 DATA_DIR 作为数据来源
         agg_df = aggregator.aggregate_physical_table(DATA_DIR)
-        
+
         progress.update(80, "导出Excel...")
         aggregator.export_to_excel(output_path, agg_df=agg_df)
-        
+
         elapsed = time.time() - start_time
         progress.update(100, f"物理表汇总完成，共 {len(agg_df)} 条记录")
         logger.log(f"\n总耗时: {elapsed:.2f} 秒")
         logger.log(f"共处理 {len(agg_df)} 条记录")
         logger.log("=" * 50)
-        
+
         return agg_df
-        
+
     except FileNotFoundError as e:
         logger.log(f"\n文件未找到: {e}")
         logger.log("请检查 45G工参、路测网格、区域、网格、乡镇 等目录与文件。")
@@ -2767,61 +3564,61 @@ def run_physical_table_sector_fix(
     """
     logger = GuiLogger(log_callback)
     progress = GuiProgress(progress_callback, logger)
-    
+
     if not PHYSICAL_TABLE_AVAILABLE:
         logger.log("错误: 物理表模块未安装，无法运行扇区修正功能")
         return {}
-    
+
     progress.update(15, f"读取物理表: {os.path.basename(input_path)}")
     df = read_excel(Path(input_path))
-    
+
     progress.update(40, "检测扇区冲突...")
     conflicts = detect_sector_conflicts(df)
-    
+
     if output_dir is None:
         output_dir = os.path.dirname(input_path) or "."
-    
+
     base_name = os.path.splitext(os.path.basename(input_path))[0]
-    
+
     result = {
         "conflicts": conflicts,
         "fixed_df": df.copy(),
         "conflict_df": pd.DataFrame(),
         "fix_df": pd.DataFrame(),
     }
-    
+
     if conflicts.empty:
         progress.update(100, "未发现扇区冲突")
         logger.log("未发现扇区冲突")
         return result
-    
+
     logger.log(f"发现 {len(conflicts)} 条冲突记录")
-    
+
     if auto_fix:
         progress.update(60, "开始自动修正扇区冲突...")
         fixed_df, conflict_df, fix_df = auto_fix_sector_conflicts(df)
         progress.update(85, "保存修正结果...")
-        
+
         # 保存结果
         out_path = os.path.join(output_dir, f"{base_name}-已修正.xlsx")
         fixed_df.to_excel(out_path, index=False)
         logger.log(f"已保存修正结果: {out_path}")
-        
+
         if not conflict_df.empty:
             conflict_out = os.path.join(output_dir, f"{base_name}-扇区冲突明细.xlsx")
             conflict_df.to_excel(conflict_out, index=False)
             logger.log(f"已保存冲突明细: {conflict_out}")
-        
+
         if not fix_df.empty:
             fix_out = os.path.join(output_dir, f"{base_name}-扇区修正明细.xlsx")
             fix_df.to_excel(fix_out, index=False)
             logger.log(f"已保存修正明细: {fix_out}")
-        
+
         result["fixed_df"] = fixed_df
         result["conflict_df"] = conflict_df
         result["fix_df"] = fix_df
         progress.update(100, f"修正完成：冲突 {len(conflict_df)} 条，修正 {len(fix_df)} 条")
-        
+
     return result
 
 
@@ -2945,10 +3742,15 @@ def run_low_efficiency_pipeline(
             f"低效小区结果生成完成，5G {len(loweff_5g)} 条，4G {len(loweff_4g)} 条，"
             f"全量4G评估 {len(loweff_4g_full)} 条"
         )
+        logger.log("开始生成物理站+频段减容评估")
+        station_band_eval = build_station_band_evaluation(table_4g)
+        able_count = int((station_band_eval["能否减容"] == "是").sum()) if not station_band_eval.empty else 0
+        logger.log(f"物理站+频段评估完成，共 {len(station_band_eval)} 条，可减容 {able_count} 个频段")
         with pd.ExcelWriter(LOWEFF_OUTPUT_PATH) as writer:
             loweff_5g.to_excel(writer, index=False, sheet_name="5G低效明细")
             loweff_4g.to_excel(writer, index=False, sheet_name="4G低效明细")
             loweff_4g_full.to_excel(writer, index=False, sheet_name="全量4G小区评估")
+            station_band_eval.to_excel(writer, index=False, sheet_name="物理站+频段评估")
             loweff_summary.to_excel(writer, index=False, sheet_name="统计汇总")
         logger.log(f"写出 {LOWEFF_OUTPUT_PATH.name} 完成")
         progress.update(100, f"已生成: {LOWEFF_OUTPUT_PATH.name}")

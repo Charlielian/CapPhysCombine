@@ -12,6 +12,7 @@ from typing import Any
 
 import pandas as pd
 
+from app.pipelines.cog_db import init_unified_database
 from app.pipelines.common import (
     BASE_DIR,
     DATA_DIR,
@@ -19,10 +20,7 @@ from app.pipelines.common import (
     GuiProgress,
     LogCallback,
     ProgressCallback,
-    SourceFileError,
-    read_excel,
 )
-from app.pipelines.cog_db import init_unified_database
 from app.pipelines.io import get_excel_engine, get_unified_db_connection
 
 _META_RE = re.compile(

@@ -247,18 +247,27 @@ def build_low_efficiency_table(
             for _, row in sector_df.iterrows():
                 station = normalize_text(row.get("物理站"))
                 this_m = _resolve_lte_band_m(row)
-                after_util = "[-]"
-                after_traffic = "[-]"
+                after_util_obj: object = "[-]"
+                after_traffic_obj: object = "[-]"
                 low_reason = ""
                 impact = None
                 if has_sector and this_m is not None and denom > this_m:
                     new_denom = denom - this_m
                     if new_denom > 0:
-                        after_util = round(float(ps / new_denom), 2)
-                        after_traffic = round(float(traffic_sum / new_denom), 2)
-                        if after_util < 40 and after_traffic < 20:
+                        after_val = round(float(ps / new_denom), 2)
+                        traffic_val = round(float(traffic_sum / new_denom), 2)
+                        after_util_obj = after_val
+                        after_traffic_obj = traffic_val
+                        if after_val < 40 and traffic_val < 20:
                             low_reason = "拆除后扇区等效利用率<40% 且 拆除后扇区等效单载波流量<20GB"
-                            impact = float(after_util) + float(after_traffic)
+                            impact = float(after_val) + float(traffic_val)
+                        else:
+                            parts = []
+                            if float(after_val) >= 40:
+                                parts.append(f"拆除后扇区等效利用率{after_val}%≥40%")
+                            if float(traffic_val) >= 20:
+                                parts.append(f"拆除后扇区等效单载波流量{traffic_val}GB≥20GB")
+                            low_reason = "不满足减容条件: " + "; ".join(parts)
 
                 base_row = {
                     "网络制式": "4G",
@@ -276,8 +285,8 @@ def build_low_efficiency_table(
                     "自忙时有效RRC连接平均数": row.get("自忙时有效RRC连接平均数"),
                     "扇区等效利用率_拆除前": before_util,
                     "扇区等效单载波流量_拆除前": before_traffic,
-                    "小区拆除后扇区等效利用率（<40%）": after_util,
-                    "扇区等效单载波流量_拆除后": after_traffic,
+                    "小区拆除后扇区等效利用率（<40%）": after_util_obj,
+                    "扇区等效单载波流量_拆除后": after_traffic_obj,
                     "能否减容": "是" if low_reason else "否",
                     "低效原因": low_reason,
                 }
@@ -340,6 +349,221 @@ def build_low_efficiency_table(
 
 
 
+STATION_BAND_EVAL_COLUMNS = [
+    "物理站",
+    "频段",
+    "频段内小区数",
+    "等效载波权重",
+    "频段等效利用率(%)",
+    "频段等效单载波流量(GB)",
+    "物理站总等效载波权重(拆除前)",
+    "物理站等效利用率_拆除前(%)",
+    "物理站等效单载波流量_拆除前(GB)",
+    "拆除后物理站等效载波权重",
+    "拆除后物理站等效利用率(<40%)",
+    "拆除后物理站等效单载波流量(<20GB)",
+    "能否减容",
+    "低效原因",
+    "物理站含所有4G频段",
+    "地市",
+]
+
+
+def build_station_band_evaluation(
+    table_4g: pd.DataFrame,
+) -> pd.DataFrame:
+    """按物理站+频段评估减容可行性。
+
+    对于每个物理站，如果有多套4G频段，评估减掉其中一套频段后
+    剩余频段能否承载原有流量。等效载波计算方式与扇区评估一致。
+
+    Parameters
+    ----------
+    table_4g : 4G 容量表 DataFrame，需包含 物理站、band、自忙时利用率、日均流量 列。
+
+    Returns
+    -------
+    评估结果 DataFrame。
+    """
+    if table_4g is None or table_4g.empty:
+        return pd.DataFrame(columns=STATION_BAND_EVAL_COLUMNS)
+
+    # 复制并标准化频段
+    work = table_4g.copy()
+    work["_std_band"] = work["band"].map(_normalize_capacity_band)
+    work = work[work["_std_band"].astype(bool)].copy()
+
+    if work.empty:
+        return pd.DataFrame(columns=STATION_BAND_EVAL_COLUMNS)
+
+    # Stage 1: 按 (物理站, 频段) 聚合，计算每个频段的等效载波权重/利用率/流量 + 扇区集合
+    band_records: list[dict[str, object]] = []
+    for (station, band), group in work.groupby(
+        [work["物理站"].map(normalize_text), work["_std_band"]], dropna=False
+    ):
+        if not station:
+            continue
+        station = normalize_text(station)
+        band_denom = 0.0
+        band_ps = 0.0
+        band_traffic = 0.0
+        cell_count = 0
+        city = ""
+        band_sectors: set[str] = set()
+
+        for _, srow in group.iterrows():
+            m = _resolve_lte_band_m(srow)
+            if m is None:
+                continue
+            util = pd.to_numeric(srow.get("自忙时利用率"), errors="coerce")
+            traffic = pd.to_numeric(srow.get("日均流量"), errors="coerce")
+            if pd.notna(util):
+                band_ps += m * util
+            if pd.notna(traffic):
+                band_traffic += traffic
+            band_denom += m
+            cell_count += 1
+            if not city:
+                city = normalize_text(srow.get("地市")) or ""
+            # 收集该小区所属扇区
+            sec = normalize_text(srow.get("扇区"))
+            if sec:
+                band_sectors.add(sec)
+
+        if band_denom == 0:
+            continue
+
+        band_records.append({
+            "物理站": station,
+            "频段": band,
+            "频段内小区数": cell_count,
+            "等效载波权重": round(band_denom, 2),
+            "频段等效利用率(%)": round(float(band_ps / band_denom), 2),
+            "频段等效单载波流量(GB)": round(float(band_traffic / band_denom), 2),
+            "_band_denom": band_denom,
+            "_band_ps": band_ps,
+            "_band_traffic": band_traffic,
+            "_band_sectors": band_sectors,
+            "地市": city,
+        })
+
+    if not band_records:
+        return pd.DataFrame(columns=STATION_BAND_EVAL_COLUMNS)
+
+    bands_df = pd.DataFrame(band_records)
+
+    # Stage 2: 按物理站汇总，计算站级总等效载波
+    station_agg = bands_df.groupby("物理站").agg(
+        station_denom=("_band_denom", "sum"),
+        station_ps=("_band_ps", "sum"),
+        station_traffic=("_band_traffic", "sum"),
+        station_band_count=("频段", "count"),
+        station_all_bands=("频段", lambda x: "/".join(sorted(x))),
+    ).reset_index()
+
+    # 合并
+    merged = bands_df.merge(station_agg, on="物理站", how="left")
+
+    # Stage 3: 评估拆除每套频段后的影响
+    # 先按物理站预计算：每个站的每个频段的扇区集合
+    station_band_sectors: dict[str, dict[str, set[str]]] = {}
+    for rec in band_records:
+        station = rec["物理站"]
+        if station not in station_band_sectors:
+            station_band_sectors[station] = {}
+        station_band_sectors[station][rec["频段"]] = rec.get("_band_sectors", set())
+
+    rows: list[dict[str, object]] = []
+    for _, rec in merged.iterrows():
+        station = rec["物理站"]
+        band = rec["频段"]
+        station_denom = float(rec["station_denom"])
+        station_ps = float(rec["station_ps"])
+        station_traffic = float(rec["station_traffic"])
+        band_denom = float(rec["_band_denom"])
+        band_ps = float(rec["_band_ps"])
+        band_traffic = float(rec["_band_traffic"])
+        band_count = int(rec["station_band_count"])
+        band_sectors: set[str] = rec.get("_band_sectors", set())
+
+        # 站级拆除前指标
+        before_util = round(float(station_ps / station_denom), 2) if station_denom > 0 else pd.NA
+        before_traffic = round(float(station_traffic / station_denom), 2) if station_denom > 0 else pd.NA
+
+        # 拆除后指标
+        after_util: object = pd.NA
+        after_traffic: object = pd.NA
+        after_denom: object = pd.NA
+        low_reason = ""
+        can_reduce = False  # 明确标志
+
+        # 1) 先检查扇区覆盖空洞：拆除该频段后，是否存在仅由该频段覆盖的扇区
+        other_bands_sectors: set[str] = set()
+        station_bands = station_band_sectors.get(station, {})
+        for other_band, other_sectors in station_bands.items():
+            if other_band != band:
+                other_bands_sectors |= other_sectors
+        orphaned_sectors = band_sectors - other_bands_sectors
+
+        if orphaned_sectors:
+            orphaned_list = sorted(orphaned_sectors)
+            low_reason = f"拆除后扇区{','.join(orphaned_list)}缺乏覆盖，不能减容"
+        elif band_count <= 1:
+            low_reason = "物理站仅有一套频段，无法评估拆除"
+        elif station_denom <= band_denom:
+            low_reason = "拆除后无剩余等效载波，无法评估"
+        else:
+            # 2) 等效载波评估
+            new_denom = station_denom - band_denom
+            new_ps = station_ps - band_ps
+            new_traffic = station_traffic - band_traffic
+            if new_denom > 0:
+                after_util = round(float(new_ps / new_denom), 2)
+                after_traffic = round(float(new_traffic / new_denom), 2)
+                after_denom = round(new_denom, 2)
+                if float(after_util) < 40 and float(after_traffic) < 20:
+                    low_reason = "拆除后物理站等效利用率<40% 且 等效单载波流量<20GB"
+                    can_reduce = True
+                else:
+                    # 不满足阈值时也记录具体指标
+                    parts = []
+                    if float(after_util) >= 40:
+                        parts.append(f"拆除后等效利用率{after_util}%≥40%")
+                    if float(after_traffic) >= 20:
+                        parts.append(f"等效单载波流量{after_traffic}GB≥20GB")
+                    low_reason = "不满足减容条件: " + "; ".join(parts)
+
+        rows.append({
+            "物理站": station,
+            "频段": band,
+            "频段内小区数": rec["频段内小区数"],
+            "等效载波权重": rec["等效载波权重"],
+            "频段等效利用率(%)": rec["频段等效利用率(%)"],
+            "频段等效单载波流量(GB)": rec["频段等效单载波流量(GB)"],
+            "物理站总等效载波权重(拆除前)": round(station_denom, 2),
+            "物理站等效利用率_拆除前(%)": before_util,
+            "物理站等效单载波流量_拆除前(GB)": before_traffic,
+            "拆除后物理站等效载波权重": after_denom,
+            "拆除后物理站等效利用率(<40%)": after_util,
+            "拆除后物理站等效单载波流量(<20GB)": after_traffic,
+            "能否减容": "是" if can_reduce else "否",
+            "低效原因": low_reason,
+            "物理站含所有4G频段": rec["station_all_bands"],
+            "地市": rec["地市"],
+        })
+
+    result = pd.DataFrame(rows, columns=STATION_BAND_EVAL_COLUMNS)
+    if not result.empty:
+        # 可减容的排前面，再按拆除后利用率升序
+        result["_sort_key"] = result["能否减容"].map({"是": 0, "否": 1})
+        result = result.sort_values(
+            by=["_sort_key", "拆除后物理站等效利用率(<40%)", "拆除后物理站等效单载波流量(<20GB)"],
+            ascending=[True, True, True],
+        )
+        result = result.drop(columns=["_sort_key"])
+    return result
+
+
 def run_low_efficiency_pipeline(
     progress_callback: ProgressCallback | None = None,
     log_callback: LogCallback | None = None,
@@ -371,10 +595,15 @@ def run_low_efficiency_pipeline(
             f"低效小区结果生成完成，5G {len(loweff_5g)} 条，4G {len(loweff_4g)} 条，"
             f"全量4G评估 {len(loweff_4g_full)} 条"
         )
+        logger.log("开始生成物理站+频段减容评估")
+        station_band_eval = build_station_band_evaluation(table_4g)
+        able_count = int((station_band_eval["能否减容"] == "是").sum()) if not station_band_eval.empty else 0
+        logger.log(f"物理站+频段评估完成，共 {len(station_band_eval)} 条，可减容 {able_count} 个频段")
         with pd.ExcelWriter(LOWEFF_OUTPUT_PATH) as writer:
             loweff_5g.to_excel(writer, index=False, sheet_name="5G低效明细")
             loweff_4g.to_excel(writer, index=False, sheet_name="4G低效明细")
             loweff_4g_full.to_excel(writer, index=False, sheet_name="全量4G小区评估")
+            station_band_eval.to_excel(writer, index=False, sheet_name="物理站+频段评估")
             loweff_summary.to_excel(writer, index=False, sheet_name="统计汇总")
         logger.log(f"写出 {LOWEFF_OUTPUT_PATH.name} 完成")
         progress.update(100, f"已生成: {LOWEFF_OUTPUT_PATH.name}")
@@ -394,5 +623,6 @@ def run_low_efficiency_pipeline(
 __all__ = [
     "LOWEFF_OUTPUT_PATH",
     "build_low_efficiency_table",
+    "build_station_band_evaluation",
     "run_low_efficiency_pipeline",
 ]
