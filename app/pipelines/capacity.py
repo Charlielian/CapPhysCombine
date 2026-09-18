@@ -1,5 +1,10 @@
 """容量表合成流水线。"""
 
+# 业务流程说明：
+# 容量表流水线先按文件名模式发现源 Excel，再导入 DuckDB，最后按 4G、5G 和 45G
+# 三种口径构造结果表。中间表保留原始字段，派生表负责统一列名、去重和指标回填，
+# 因此导入失败与计算失败会在不同阶段报告，便于定位具体数据问题。
+
 from __future__ import annotations
 
 import time
@@ -46,18 +51,19 @@ def import_cog_coverage_to_db(
 
 
 def load_cog_coverage_mapping(
-    conn: duckdb.DuckDBPyConnection,
+    conn: duckdb.DuckDBPyConnection | None = None,
     logger: GuiLogger | None = None
 ) -> pd.DataFrame:
     """从统一数据库加载共站同覆盖小区表，返回 CGI -> 共站同覆盖名 的映射表
-    
-    现在使用统一数据库的共站同覆盖表，两个功能共享同一个数据源
+
+    现在使用统一数据库的共站同覆盖表，两个功能共享同一个数据源。
+    conn 参数保留以保持兼容性，实际通过 UNIFIED_DB_PATH 自动连接。
     """
     logger = logger or GuiLogger()
 
-    # 使用统一数据库的共站同覆盖表（复用传入的 conn）
+    # 使用统一数据库的共站同覆盖表（不传 conn，自动连接 UNIFIED_DB_PATH）
     try:
-        with CogCoverageManager(conn=conn) as mgr:
+        with CogCoverageManager() as mgr:
             count = mgr.get_count()
             if count == 0:
                 logger.log("统一数据库中共站同覆盖表为空，请通过管理界面导入")
@@ -383,7 +389,7 @@ def build_5g_table(conn: duckdb.DuckDBPyConnection, logger: GuiLogger | None = N
             CAST(NCGI AS VARCHAR) AS NCGI,
             AVG("VoNR语音话务量") AS VoNR语音话务量
         FROM "5g_kpi"
-        GROUP BY CAST(NCGI AS VARCHAR)
+        GROUP BY CAST("5g_kpi".NCGI AS VARCHAR)
     """)
 
     logger.log("  [5G] 加载周表并去重...")

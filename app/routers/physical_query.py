@@ -1,5 +1,9 @@
 """45G 工参数据查询 API（原始小区表 / 物理表汇总）。"""
 
+# API 说明：
+# raw 和 agg 映射到两张不同的统一数据库表。筛选值使用参数化 SQL，动态列名经过标识符转义；
+# 同时根据实际数据库列裁剪展示字段，以兼容不同版本生成的物理表。
+
 from __future__ import annotations
 
 from typing import Any
@@ -36,6 +40,8 @@ RAW_DISPLAY_COLS = [
     "纬度",
     "方位角",
     "挂高",
+    "beam",
+    "radius",
     "来源文件",
 ]
 
@@ -58,6 +64,8 @@ AGG_DISPLAY_COLS = [
     "共站制式情况",
     "经度",
     "纬度",
+    "beam",
+    "radius",
 ]
 
 FILTER_DIMS = {

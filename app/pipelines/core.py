@@ -179,6 +179,105 @@ def apply_lte_network_structure(agg_df: pd.DataFrame) -> pd.DataFrame:
 
 
 # ==============================================================================
+# 物理表模块：射频特征推算规则引擎 (beam & radius)
+# ==============================================================================
+
+
+def _is_indoor_site(site_type, cover_type) -> bool:
+    """判定是否为室分站（站点类型或覆盖类型包含室内/室分）。"""
+    text = f"{normalize_text(site_type)}{normalize_text(cover_type)}"
+    return "室分" in text or "室内" in text
+
+
+def _normalize_band_key(band_a, band) -> str:
+    """将 BAND_A / BAND 规范化为推算使用的频段键。"""
+    band_text = normalize_text(band_a) or normalize_text(band)
+    # 优先按 BAND_A 精确匹配，其次按 BAND 模糊归类
+    if "700" in band_text:
+        return "700M"
+    if "2.6" in band_text:
+        return "2.6G"
+    if "4.9" in band_text:
+        return "4.9G"
+    if "FDD900" in band_text:
+        return "FDD900"
+    if "FDD1800" in band_text:
+        return "FDD1800"
+    if band_text.startswith("F") and "FDD" not in band_text:
+        return "F"
+    if band_text.startswith("D") or "3Dmimo" in band_text:
+        return "D"
+    if band_text.startswith("A"):
+        return "A"
+    if band_text in NR_BANDS:
+        return band_text
+    if band_text in LTE_BANDS:
+        return band_text
+    return band_text
+
+
+def calc_beam_radius(zhishi, band_a, band, site_type, cover_type) -> tuple[float, float]:
+    """根据制式、频段与站点类型推算水平波瓣宽度 beam 与覆盖半径 radius。
+
+    返回 (beam_deg, radius_m)。
+    """
+    is_indoor = _is_indoor_site(site_type, cover_type)
+    band_key = _normalize_band_key(band_a, band)
+    zhishi_text = normalize_text(zhishi).lower()
+
+    # ---- beam -----------------------------------------------------------
+    if is_indoor:
+        beam = 359.0
+    elif zhishi_text == "5g":
+        beam_map_5g = {"700M": 40.0, "2.6G": 65.0, "4.9G": 70.0}
+        beam = beam_map_5g.get(band_key, 40.0)
+    else:  # 4g 或其他
+        beam_map_4g = {
+            "FDD900": 30.0,
+            "FDD1800": 50.0,
+            "F": 45.0,
+            "D": 60.0,
+            "A": 55.0,
+        }
+        beam = beam_map_4g.get(band_key, 40.0)
+
+    # ---- radius -----------------------------------------------------------
+    if is_indoor:
+        radius = 30.0
+    elif zhishi_text == "5g":
+        radius_map_5g = {"700M": 50.0, "2.6G": 40.0, "4.9G": 30.0}
+        radius = radius_map_5g.get(band_key, 40.0)
+    else:  # 4g 或其他
+        radius_map_4g = {
+            "FDD900": 47.0,
+            "FDD1800": 43.0,
+            "F": 39.0,
+            "D": 42.0,
+            "A": 38.0,
+        }
+        radius = radius_map_4g.get(band_key, 40.0)
+
+    return beam, radius
+
+
+def apply_beam_radius(agg_df: pd.DataFrame) -> pd.DataFrame:
+    """为物理表汇总结果批量追加 beam 与 radius 两列。"""
+    if agg_df.empty:
+        return agg_df
+    result = agg_df.copy()
+    tuples = [
+        calc_beam_radius(
+            row["网络制式"], row.get("BAND_A"), row.get("BAND"),
+            row.get("站点类型"), row.get("覆盖类型"),
+        )
+        for _, row in result.iterrows()
+    ]
+    result["beam"] = [t[0] for t in tuples]
+    result["radius"] = [t[1] for t in tuples]
+    return result
+
+
+# ==============================================================================
 # 物理表模块：扇区解析 (section.py)
 # ==============================================================================
 
@@ -877,7 +976,9 @@ def init_physical_database(conn):
             乡镇街道 TEXT,
             一级标签 TEXT,
             路测网格 TEXT,
-            来源文件 TEXT
+            来源文件 TEXT,
+            beam DOUBLE,
+            radius DOUBLE
         )
     """)
     conn.execute("""
@@ -919,7 +1020,9 @@ def init_physical_database(conn):
             物理站名_距离聚合 TEXT,
             物理站LTE制式_距离聚合 TEXT,
             物理站制式_距离聚合 TEXT,
-            共站制式情况_距离聚合 TEXT
+            共站制式情况_距离聚合 TEXT,
+            beam DOUBLE,
+            radius DOUBLE
         )
     """)
 
@@ -1657,7 +1760,7 @@ def table_exists(conn: duckdb.DuckDBPyConnection, table_name: str) -> bool:
 
 
 def get_table_columns(conn: duckdb.DuckDBPyConnection, table_name: str) -> list[str]:
-    result = conn.execute(f"DESCRIBE {duckdb.quote_ident(table_name)}").fetchdf()
+    result = conn.execute(f'DESCRIBE "{table_name}"').fetchdf()
     return list(result["column_name"])
 
 
@@ -3218,6 +3321,9 @@ class PhysicalTableAggregator:
         if before_dedup != after_dedup:
             print(f"去重后剩余 {after_dedup} 条记录（去除 {before_dedup - after_dedup} 条重复CGI）")
 
+        # 先为原始小区数据推算 beam / radius，供原始小区表与物理表共用
+        all_cells = apply_beam_radius(all_cells)
+
         # 使用 DuckDB 方式写入数据 - 直接注册 DataFrame 为临时表
         self.conn.register("df_cells", all_cells)
         self.conn.execute("""
@@ -3243,7 +3349,9 @@ class PhysicalTableAggregator:
                 CAST(乡镇街道 AS VARCHAR),
                 CAST(一级标签 AS VARCHAR),
                 CAST(路测网格 AS VARCHAR),
-                CAST(来源文件 AS VARCHAR)
+                CAST(来源文件 AS VARCHAR),
+                CAST(beam AS DOUBLE),
+                CAST(radius AS DOUBLE)
             FROM df_cells
         """)
         self.conn.unregister("df_cells")
@@ -3372,6 +3480,8 @@ class PhysicalTableAggregator:
                 "一级标签": all_cells["一级标签"].values,
                 "网络结构4G": "",
                 "共站制式情况": "",
+                "beam": all_cells["beam"].values,
+                "radius": all_cells["radius"].values,
             }
         )
 
@@ -3446,7 +3556,9 @@ class PhysicalTableAggregator:
                 CAST(物理站名_距离聚合 AS VARCHAR),
                 CAST(物理站LTE制式_距离聚合 AS VARCHAR),
                 CAST(物理站制式_距离聚合 AS VARCHAR),
-                CAST(共站制式情况_距离聚合 AS VARCHAR)
+                CAST(共站制式情况_距离聚合 AS VARCHAR),
+                CAST(beam AS DOUBLE),
+                CAST(radius AS DOUBLE)
             FROM df_agg
         """)
         self.conn.unregister("df_agg")
