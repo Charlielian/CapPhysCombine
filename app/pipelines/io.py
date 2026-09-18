@@ -13,6 +13,10 @@ Excel 读取引擎：
 - 写入仍使用 openpyxl（calamine 仅支持读取）。
 """
 
+# IO 生命周期说明：
+# Excel 读取优先走 calamine，解析结果按文件名、mtime 和 size 生成 Parquet 缓存键。
+# 缓存失效或 pyarrow 不可用时自动回退到 Excel 读取，功能正确性优先于缓存性能。
+
 from __future__ import annotations
 
 import hashlib
@@ -366,7 +370,7 @@ def table_exists(conn: duckdb.DuckDBPyConnection, table_name: str) -> bool:
 
 
 def get_table_columns(conn: duckdb.DuckDBPyConnection, table_name: str) -> list[str]:
-    result = conn.execute(f"DESCRIBE {duckdb.quote_ident(table_name)}").fetchdf()
+    result = conn.execute(f'DESCRIBE "{table_name}"').fetchdf()
     return list(result["column_name"])
 
 
