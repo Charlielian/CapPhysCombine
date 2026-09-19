@@ -1,5 +1,9 @@
 """Shared API response schemas."""
 
+# 兼容说明：
+# 该文件保留较早版本路由使用的响应模型。新接口主要使用 app.schemas，
+# 但这里的模型不能随意删除，否则旧客户端或未迁移的路由会导入失败。
+
 from __future__ import annotations
 
 from typing import Any

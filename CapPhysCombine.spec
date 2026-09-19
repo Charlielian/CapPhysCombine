@@ -1,5 +1,7 @@
 # -*- mode: python ; coding: utf-8 -*-
 
+# PyInstaller 入口与运行期资源清单。app/static 以及 GeoJSON 目录必须一并打包，
+# 否则 exe 启动后虽然能导入 Python 模块，却无法提供页面或完成空间查询。
 block_cipher = None
 
 a = Analysis(

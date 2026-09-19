@@ -1,5 +1,9 @@
 """共站同覆盖表（统一数据库）管理。"""
 
+# 数据库说明：
+# 共站同覆盖数据存放在统一 DuckDB 中，Web API 和各流水线通过独立连接访问。
+# CGI 是记录级唯一键；导入 replace 模式会按业务要求替换整批数据，普通新增则拒绝重复 CGI。
+
 from __future__ import annotations
 
 import re

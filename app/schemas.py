@@ -9,6 +9,10 @@ Usage in routers:
     return SuccessResponse(data=result_dict)                # explicit success envelope
 """
 
+# 模块说明：
+# API 使用统一的成功/失败 envelope，避免每个路由返回不同 JSON 结构。
+# JobSummary 适用于列表，JobDetail 额外包含日志和结果；新增字段应注意兼容已有前端。
+
 from __future__ import annotations
 
 from typing import Any, TypeVar

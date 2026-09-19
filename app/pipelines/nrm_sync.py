@@ -4,6 +4,10 @@
 4G: earfcnDl(MHz) + freqBandInd -> EARFCN（3GPP TS 36.101）
 """
 
+# 数据同步说明：
+# NRM Excel 的字段名和单元格内容可能混有参数描述、单位和空值。本模块先清洗并抽取
+# 小区配置，再用 CGI/频点等稳定键匹配统一物理表；匹配不到的记录只计入统计，不覆盖原表。
+
 from __future__ import annotations
 
 import re

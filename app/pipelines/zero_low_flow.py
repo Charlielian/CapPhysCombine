@@ -15,6 +15,11 @@
   4. 输出全量和风险子集 Excel
 """
 
+# 业务规则说明：
+# 零低流量分析以“日期 × 小区”为粒度，按最新日期向历史日期回溯连续天数。
+# 4G 低流量阈值为 0.1GB，5G 为 3GB；显式 file_paths 表示用户选择的输入集合，
+# 未传入时才扫描 DATA_DIR。路径安全校验在 jobs.py 完成，管线只负责筛选和计算。
+
 from __future__ import annotations
 
 from pathlib import Path
@@ -68,18 +73,37 @@ RISK_ORDER = {"严重": 0, "高危": 1, "中危": 2, "预警": 3, "关注": 4, "
 
 def find_day_flow_files(data_dir: Path | None = None, pattern: str = DAY_FLOW_PATTERN_4G) -> list[Path]:
     """查找指定模式的天流量文件。"""
-    root = data_dir or DATA_DIR
+    root = Path(data_dir) if data_dir else DATA_DIR
     files = sorted(
         p for p in root.glob(pattern) if p.is_file() and not p.name.startswith(".~")
     )
     return files
 
 
+def _select_day_flow_files(
+    data_dir: Path | None,
+    file_paths: list[Path] | None,
+    pattern: str,
+) -> list[Path]:
+    if file_paths is not None:
+        root = Path(data_dir) if data_dir else DATA_DIR
+        files = sorted(
+            path for path in file_paths
+            if path.is_file()
+            and path.parent == root
+            and path.match(pattern)
+            and not path.name.startswith(".~")
+        )
+        return files
+    return find_day_flow_files(data_dir, pattern)
+
+
 def find_day_flow_files_4g(data_dir: Path | None = None) -> list[Path]:
     """查找 4G 天流量文件。"""
-    files = find_day_flow_files(data_dir, DAY_FLOW_PATTERN_4G)
+    root = Path(data_dir) if data_dir else DATA_DIR
+    files = find_day_flow_files(root, DAY_FLOW_PATTERN_4G)
     if not files:
-        raise SourceFileError(f"未找到 4G 天流量文件: {DATA_DIR / DAY_FLOW_PATTERN_4G}")
+        raise SourceFileError(f"未找到 4G 天流量文件: {root / DAY_FLOW_PATTERN_4G}")
     return files
 
 
@@ -371,6 +395,7 @@ def run_4g_zero_low_flow_pipeline(
     log_callback: LogCallback | None = None,
     data_dir: Path | str | None = None,
     output_dir: Path | str | None = None,
+    file_paths: list[Path] | None = None,
 ) -> Path:
     """运行 4G 零低流量风险小区分析，返回输出 Excel 路径。"""
     logger = GuiLogger(log_callback)
@@ -383,7 +408,9 @@ def run_4g_zero_low_flow_pipeline(
     logger.log("=" * 50)
 
     progress.update(5, f"读取数据目录: {data_root}")
-    file_paths = find_day_flow_files_4g(data_root)
+    file_paths = _select_day_flow_files(data_root, file_paths, DAY_FLOW_PATTERN_4G)
+    if not file_paths:
+        raise SourceFileError(f"未找到 4G 天流量文件: {data_root / DAY_FLOW_PATTERN_4G}")
     raw_df = load_and_merge_4g(file_paths, logger)
     required = ["CGI", "小区名称", "所属地市", "记录开始时间", "日4G流量（GB）"]
     missing = [c for c in required if c not in raw_df.columns]
@@ -481,6 +508,7 @@ def run_5g_zero_low_flow_pipeline(
     log_callback: LogCallback | None = None,
     data_dir: Path | str | None = None,
     output_dir: Path | str | None = None,
+    file_paths: list[Path] | None = None,
 ) -> Path | None:
     """运行 5G 零低流量风险小区分析，返回输出 Excel 路径。
 
@@ -500,7 +528,7 @@ def run_5g_zero_low_flow_pipeline(
     logger.log("=" * 50)
 
     progress.update(5, f"读取数据目录: {data_root}")
-    file_paths = find_day_flow_files_5g(data_root)
+    file_paths = _select_day_flow_files(data_root, file_paths, DAY_FLOW_PATTERN_5G)
     if not file_paths:
         logger.log("[提示] 未找到 5G 天流量文件，跳过 5G 分析")
         return None
@@ -631,6 +659,7 @@ def run_zero_low_flow_pipeline(
     data_dir: Path | str | None = None,
     output_dir: Path | str | None = None,
     net_type: str = "4g",
+    file_paths: list[Path] | None = None,
 ) -> Path | None:
     """统一入口：运行零低流量风险小区分析。
 
@@ -645,6 +674,7 @@ def run_zero_low_flow_pipeline(
             log_callback=log_callback,
             data_dir=data_dir,
             output_dir=output_dir,
+            file_paths=file_paths,
         )
     elif net_type == "5g":
         return run_5g_zero_low_flow_pipeline(
@@ -652,6 +682,7 @@ def run_zero_low_flow_pipeline(
             log_callback=log_callback,
             data_dir=data_dir,
             output_dir=output_dir,
+            file_paths=file_paths,
         )
     else:  # "all"
         result_4g = run_4g_zero_low_flow_pipeline(
@@ -659,12 +690,14 @@ def run_zero_low_flow_pipeline(
             log_callback=log_callback,
             data_dir=data_dir,
             output_dir=output_dir,
+            file_paths=file_paths,
         )
         result_5g = run_5g_zero_low_flow_pipeline(
             progress_callback=progress_callback,
             log_callback=log_callback,
             data_dir=data_dir,
             output_dir=output_dir,
+            file_paths=file_paths,
         )
         return result_5g or result_4g
 

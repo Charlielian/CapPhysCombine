@@ -1,6 +1,8 @@
-"""P0 修复回归测试：apply_sector_mapping 覆盖 bug + physical 包导入链。
+"""P0/P1/P2 修复的回归测试集合。
 
-Run: python -m pytest tests/test_p0_fixes.py -q
+测试使用小型内存 DataFrame、临时目录和局部 monkey-patch，重点覆盖
+导入链、映射保留原值、日志回调、路由存在性及任务路径安全，不依赖真实业务数据库。
+运行：``python -m pytest tests/test_p0_fixes.py -q``。
 """
 
 from __future__ import annotations
@@ -529,7 +531,38 @@ class AsyncExecutorTests(unittest.TestCase):
                 data_mod.DATA_DIR = orig_mod_data_dir
 
 
-class ParquetCacheTests(unittest.TestCase):
+class ZeroLowFlowPathTests(unittest.TestCase):
+    def test_uploaded_basename_resolves_inside_data_dir(self):
+        from app.jobs import JobManager
+        import app.jobs as jobs_mod
+
+        original = jobs_mod.DATA_DIR
+        with tempfile.TemporaryDirectory() as tmpdir:
+            jobs_mod.DATA_DIR = Path(tmpdir)
+            resolved = JobManager._zero_low_flow_file_paths(["重要场景-天_2026-08-19_阳江.xlsx"])
+            self.assertEqual(resolved[0].resolve(), (Path(tmpdir) / "重要场景-天_2026-08-19_阳江.xlsx").resolve())
+        jobs_mod.DATA_DIR = original
+
+    def test_uploaded_path_cannot_escape_data_dir(self):
+        from app.jobs import JobManager
+        import app.jobs as jobs_mod
+
+        original = jobs_mod.DATA_DIR
+        with tempfile.TemporaryDirectory() as tmpdir:
+            jobs_mod.DATA_DIR = Path(tmpdir)
+            with self.assertRaises(ValueError):
+                JobManager._zero_low_flow_file_paths(["../outside.xlsx"])
+        jobs_mod.DATA_DIR = original
+
+    def test_4g_missing_file_error_uses_scanned_directory(self):
+        from app.pipelines.zero_low_flow import find_day_flow_files_4g
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            with self.assertRaises(Exception) as ctx:
+                find_day_flow_files_4g(Path(tmpdir))
+            self.assertIn(str(Path(tmpdir)), str(ctx.exception))
+
+
     """P2-4: Parquet 中间层缓存，避免每次 init_db 删库重建。"""
 
     def setUp(self):

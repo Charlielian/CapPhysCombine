@@ -1,5 +1,9 @@
 """物理表扩展 API：扇区冲突检测/修正、低效与零低流量结果查看。"""
 
+# API 说明：
+# 该路由提供物理表冲突、低效和零低流量结果的查看/操作接口。
+# 用户路径必须解析到 BASE_DIR 内，避免 API 读取任意本地文件。
+
 from __future__ import annotations
 
 from pathlib import Path

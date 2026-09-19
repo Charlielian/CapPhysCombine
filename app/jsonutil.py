@@ -1,5 +1,9 @@
 """JSON helpers for pandas payloads."""
 
+# 模块说明：
+# Excel/DuckDB 查询结果经常包含 pandas 的 NaN、NaT、numpy 标量等 JSON 不支持的值。
+# 本模块在 API 输出前统一做安全转换，保证前端收到的是标准 JSON 的 null、数字和字符串。
+
 from __future__ import annotations
 
 import json

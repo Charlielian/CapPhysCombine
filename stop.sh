@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Stop CapPhysCombine service
+# 停止本地 Web 服务：先发送 SIGTERM 留出优雅退出时间，超时后才使用 SIGKILL。
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"

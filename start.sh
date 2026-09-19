@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Start CapPhysCombine service
+# 启动本地 Web 服务；PID 文件用于防止重复启动，标准输出和错误输出写入 logs/server.log。
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"

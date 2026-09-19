@@ -1,5 +1,8 @@
 name: Tests
 
+# 在主分支推送、拉取请求或手工触发时，使用多个 Python 版本运行同一套回归测试。
+# lint/type check 目前只作提示，不因存量问题阻断测试流水线。
+
 on:
   push:
     branches:

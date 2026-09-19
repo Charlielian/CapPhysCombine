@@ -26,7 +26,7 @@
 </head>
 <body>
   <div class="app-shell">
-    <!-- Sidebar -->
+    <!-- 左侧导航只负责切换数据处理功能面板；data-tab 值必须与对应 panel-* 的后缀一致。 -->
     <aside class="sidebar">
       <div class="sidebar-brand">CPC</div>
       <button class="tab active" data-tab="capacity" data-tooltip="容量表合成" type="button">
@@ -55,7 +55,7 @@
       </button>
     </aside>
 
-    <!-- Main content area -->
+    <!-- 主内容区：顶部全局操作栏，下面是可切换的功能面板和统一任务侧栏。 -->
     <div class="content-area">
       <!-- Top bar -->
       <header class="topbar">
@@ -99,7 +99,7 @@
 
       <!-- Body: left content + right panel -->
       <div class="body-area">
-        <!-- Left: main content scroll area -->
+        <!-- 页面面板区与右侧任务状态区共享滚动布局；按钮 id 是 app.js 事件绑定的稳定契约。 -->
         <div class="main-scroll">
           <!-- Tab 1: 容量表合成 -->
           <section id="panel-capacity" class="tab-panel active card">
@@ -377,7 +377,7 @@
           </section>
         </div>
 
-        <!-- Right side panel: data status (HTMX 局部刷新；离线时由 app.js 回退为 JSON 刷新) -->
+        <!-- 右侧状态面板由 HTMX 首次加载或 app.js 的 JSON 回退刷新，展示输入资产和任务运行状态。 -->
         <aside class="side-panel">
           <div
             id="statusPanel"

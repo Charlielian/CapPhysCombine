@@ -1,5 +1,10 @@
 """Path and runtime configuration."""
 
+# 模块说明：
+# 这里集中管理运行时路径和 Web 服务参数。配置文件优先级高于环境变量，
+# 环境变量又高于代码默认值；这样既支持本地开发，也支持 Docker/生产环境注入配置。
+# DATA_DIR、BASE_DIR 等路径由 paths.py 统一计算，避免各模块自行拼接路径造成不一致。
+
 from __future__ import annotations
 
 import os

@@ -1,3 +1,6 @@
+# API 说明：
+# 本路由管理输入文件、输出文件和缓存状态。上传接口只返回安全的 basename，
+# 任务端再把它解析到受控 DATA_DIR；下载接口则只允许 BASE_DIR 下的表格文件。
 from __future__ import annotations
 
 import asyncio

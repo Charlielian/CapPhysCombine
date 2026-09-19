@@ -1,5 +1,10 @@
 #!/usr/bin/env python3
-"""Probe NRM Excel for PCI/TAC/freq and match against 原始小区表."""
+"""一次性 NRM 配置核查工具。
+
+从网管 Excel 读取 PCI/TAC/频点相关字段，规范化 CGI 后与统一库的原始小区表
+匹配并打印核查结果。它直接读取本机 ``data/网管配置`` 和数据库，属于诊断工具，
+不参与 Web 任务，也不会替代正式的 ``nrm-sync`` 流程。
+"""
 from __future__ import annotations
 
 import re

@@ -1,7 +1,8 @@
-"""Lightweight regression smoke tests (no full Excel pipelines).
+"""轻量级回归冒烟测试，不执行完整 Excel 流水线。
 
-Run: python tests/smoke_test.py
-Or:  python -m pytest tests/smoke_test.py -q
+这些测试优先验证模块可导入、公共导出和小型 DataFrame 规则；
+这样 CI 可以在不准备大体积业务文件的情况下尽早发现启动级回归。
+运行：``python tests/smoke_test.py`` 或 ``python -m pytest tests/smoke_test.py -q``。
 """
 
 from __future__ import annotations

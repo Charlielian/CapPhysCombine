@@ -1,5 +1,10 @@
 #!/usr/bin/env python3
-"""CapPhysCombine CLI — 按功能分子命令的统一入口。"""
+"""CapPhysCombine CLI — 按功能分子命令的统一入口。
+
+正式批处理入口集中在这里，Web 服务和各条数据流水线共用 app/ 实现。
+无子命令时默认启动 Web 服务，旧版本的 ``--mode`` 参数继续保留以兼容
+脚本、快捷方式和已打包的可执行文件。
+"""
 
 from __future__ import annotations
 

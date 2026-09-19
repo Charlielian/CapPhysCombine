@@ -25,7 +25,7 @@ import pandas as pd
 
 from app.jsonutil import df_records
 from app.pipelines.capacity import run_pipeline
-from app.pipelines.common import BASE_DIR, LOWEFF_OUTPUT_PATH, UNIFIED_DB_PATH
+from app.pipelines.common import BASE_DIR, DATA_DIR, LOWEFF_OUTPUT_PATH, UNIFIED_DB_PATH
 from app.pipelines.core import (
     discover_4g_week_files,
     run_multi_week_loweff,
@@ -458,6 +458,38 @@ class JobManager:
 
     # -- convenience: typed start methods ------------------------------------
 
+    @staticmethod
+    def _resolve_zero_low_flow_file_path(file_path: str | Path) -> Path:
+        """Resolve an uploaded filename inside the configured data directory."""
+        data_root = DATA_DIR.resolve()
+        candidate = Path(file_path).expanduser()
+        if candidate.is_absolute():
+            resolved = candidate.resolve()
+        else:
+            resolved = (data_root / candidate).resolve()
+        try:
+            resolved.relative_to(data_root)
+        except ValueError as exc:
+            raise ValueError(f"输入文件必须位于数据目录内: {file_path}") from exc
+        return resolved
+
+    @classmethod
+    def _zero_low_flow_file_paths(cls, file_paths: list[str] | None) -> list[Path] | None:
+        if not file_paths:
+            return None
+        resolved_paths = [cls._resolve_zero_low_flow_file_path(path) for path in file_paths]
+        parent_dirs = {path.parent for path in resolved_paths}
+        if len(parent_dirs) != 1:
+            raise ValueError("零低流量分析的输入文件必须位于同一数据目录")
+        return resolved_paths
+
+    @classmethod
+    def _zero_low_flow_data_dir(cls, file_paths: list[str] | None) -> str | None:
+        resolved_paths = cls._zero_low_flow_file_paths(file_paths)
+        if not resolved_paths:
+            return None
+        return str(resolved_paths[0].parent)
+
     def start_capacity(self) -> Job:
         def runner(job: Job) -> None:
             def on_progress(value: int, message: str) -> None:
@@ -665,19 +697,19 @@ class JobManager:
             def on_log(message: str) -> None:
                 self._append_log(job, message)
 
-            # file_paths 是 list[str] | None，而 data_dir 期望单个目录路径。
-            # 有文件列表时取其公共父目录；无文件时传 None（使用默认 DATA_DIR）。
-            data_dir: str | None = None
-            if file_paths:
-                data_dir = str(Path(file_paths[0]).parent)
+            # 上传接口返回文件名；统一解析到受控 DATA_DIR，禁止按进程 cwd 解释。
+            resolved_file_paths = self._zero_low_flow_file_paths(file_paths)
+            data_dir = str(resolved_file_paths[0].parent) if resolved_file_paths else None
 
             path = run_zero_low_flow_pipeline(
                 progress_callback=on_progress,
                 log_callback=on_log,
                 data_dir=data_dir,
                 net_type=network,
+                file_paths=resolved_file_paths,
             )
-            job.result_files = [Path(path).name]
+            if path is not None:
+                job.result_files = [Path(path).name]
 
         kind = f"zero_low_flow_{network}"
         return self.start(kind, runner)

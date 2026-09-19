@@ -1,5 +1,9 @@
 """Pipeline package: domain modules for CapPhysCombine."""
 
+# 包接口说明：
+# 这里只暴露对外稳定的流水线入口和常用路径。内部辅助函数不放入 __all__，
+# 这样可以在不影响 CLI/API 的情况下调整实现细节。
+
 from app.pipelines.capacity import (
     FILE_PATTERNS,
     build_4g_table,

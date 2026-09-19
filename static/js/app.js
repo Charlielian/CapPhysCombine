@@ -1,4 +1,6 @@
 (() => {
+  // 页面状态集中保存在一个对象中：任务轮询、分页、筛选条件和结果表格都从这里读取，
+  // 避免在多个事件处理器之间依赖隐含的 DOM 状态。
   const state = {
     jobId: null,
     pollTimer: null,
@@ -37,6 +39,8 @@
 
   const $ = (id) => document.getElementById(id);
 
+  // 所有后端请求都经过这里：统一解析 JSON envelope，并把 HTTP/API 错误转成可展示的 Error。
+  // 调用方只处理业务数据，不需要重复判断响应类型或 SuccessResponse 格式。
   async function api(path, options = {}) {
     const res = await fetch(path, options);
     const contentType = res.headers.get("content-type") || "";
@@ -78,6 +82,7 @@
     box.scrollTop = box.scrollHeight;
   }
 
+  // 任务运行期间禁用会启动新任务或修改共享数据的控件；查询和主题切换不受影响。
   function setBusy(busy) {
     ["startCapacityBtn", "startPhysicalBtn", "startNrmSyncBtn", "startLoweffBtn", "startZeroFlowBtn", "startZeroFlow5gBtn", "checkConflictBtn", "fixConflictBtn",
      "multiweekStartBtn", "multiweekRefreshBtn"]
@@ -89,6 +94,7 @@
     if (mwFileInput) mwFileInput.disabled = busy;
   }
 
+  // 后台任务只返回输出文件名，下载链接固定走受控 outputs 路由，避免前端拼接任意文件路径。
   function renderResultLinks(files) {
     const box = $("resultLinks");
     box.innerHTML = "";
@@ -337,6 +343,7 @@
     });
   }
 
+  // 轮询接口是前端任务状态机：运行中持续更新，完成/失败/取消后停止定时器并释放控件。
   async function pollJob() {
     if (!state.jobId) return;
     try {
@@ -398,6 +405,7 @@
     }
   }
 
+  // 零低流量上传完成后，把用户实际选择的文件名随任务请求提交；后端负责解析到 data/ 并校验路径。
   async function startZeroFlowWithFiles(fileList, network) {
     if (!fileList || !fileList.length) return;
     const formData = new FormData();
@@ -432,6 +440,7 @@
     }
   }
 
+  // 通用任务启动入口：提交参数后立即进入轮询，最终刷新进度、日志和结果下载区。
   async function startJob(path, options = {}) {
     try {
       setBusy(true);
@@ -557,6 +566,7 @@
     }
   }
 
+  // 标签页切换只改变面板可见性；需要数据库元数据的页面在首次进入时懒加载。
   function switchTab(name) {
     document.querySelectorAll(".tab").forEach((t) => {
       t.classList.toggle("active", t.dataset.tab === name);
@@ -631,6 +641,7 @@
     }
   }
 
+  // 物理表查询由后端分页，前端仅维护筛选条件、分页游标和当前页渲染结果。
   async function loadPhysQuery(options = {}) {
     const resetOffset = options.resetOffset !== false;
     if (resetOffset) state.physQuery.offset = 0;
@@ -829,6 +840,7 @@
     meta.textContent = text;
   }
 
+  // 零低流量结果来自任务输出文件；表格筛选在浏览器端完成，不重新执行分析任务。
   async function loadZeroFlow() {
     const sheet = $("zeroFlowSheet").value;
     const keyword = $("zeroFlowKeyword").value.trim();
@@ -1073,6 +1085,7 @@
     }
   }
 
+  // 集中注册页面事件，确保动态表格、文件上传和任务按钮共享同一套状态更新逻辑。
   function bindEvents() {
     document.querySelectorAll(".tab").forEach((tab) => {
       tab.addEventListener("click", () => switchTab(tab.dataset.tab));
@@ -1092,7 +1105,7 @@
     }
     $("zeroFlowFileInput").onchange = (e) => startZeroFlowWithFiles(e.target.files);
     if ($("zeroFlow5gFileInput")) {
-      $("zeroFlow5gFileInput").onchange = (e) => startZeroFlow5gWithFiles(e.target.files);
+      $("zeroFlow5gFileInput").onchange = (e) => startZeroFlowWithFiles(e.target.files, "5g");
     }
     $("loadZeroFlowBtn").onclick = () => loadZeroFlow().catch((e) => alert(e.message));
     $("zeroFlowSheet").onchange = () => loadZeroFlow().catch(() => {});
@@ -1234,6 +1247,7 @@
       : "dark";
   }
 
+  // 主题偏好写入 localStorage；auto 模式只记录用户选择，实际颜色由系统媒体查询决定。
   function applyTheme(pref) {
     const eff = effectiveTheme(pref);
     document.documentElement.setAttribute("data-theme", eff);
@@ -1357,6 +1371,7 @@
     }
   }
 
+  // 多周期任务先提交用户勾选的周文件，再由后台按选定周期计算全量评估。
   async function startMultiWeekLoweff() {
     const selected = [...state.multiweek.selected];
     if (selected.length < 2) {
@@ -1411,6 +1426,7 @@
     }
   }
 
+  // 初始化阶段只加载轻量状态和事件；各结果页按需查询，避免打开页面即触发大表扫描。
   async function init() {
     bindEvents();
     initThemeSwitcher();

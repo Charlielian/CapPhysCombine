@@ -4,6 +4,10 @@ Uses FastAPI dependency injection for ``JobManager`` so the router is
 fully testable (swap ``app.dependency_overrides[get_job_manager]`` in tests).
 """
 
+# API 说明：
+# 任务接口只负责校验请求并异步创建 Job，响应中的 job.id 供前端轮询。
+# 依赖未满足或已有任务运行时统一转换为 409；真正的异常和进度由 JobManager 保存。
+
 from __future__ import annotations
 
 from typing import Any

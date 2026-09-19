@@ -4,6 +4,10 @@
 全程在 SQL 内完成，性能优于逐点 Python 循环。
 """
 
+# 空间查询说明：
+# DuckDB Spatial 在 SQL 中完成 GeoJSON 加载和点面相交，避免逐点调用 Python 几何库。
+# 输入输出按原始索引对齐，即使坐标无效或没有命中多边形，也必须返回对应位置的 None。
+
 from __future__ import annotations
 
 import os

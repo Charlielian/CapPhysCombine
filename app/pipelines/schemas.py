@@ -4,6 +4,10 @@ pandera 是可选依赖；未安装时退化为简单的列存在性检查。
 所有 schema 只声明「必需列」，不约束类型（Excel 来源类型不稳定）。
 """
 
+# 数据契约说明：
+# SourceSchema 只约束“必需列是否存在”，不强制 Excel 列类型，因为不同厂家导出的
+# 数字、日期和空值类型并不稳定。pandera 可用时提供更清晰的诊断，不可用时保留基础校验。
+
 from __future__ import annotations
 
 from collections.abc import Iterable

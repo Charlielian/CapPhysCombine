@@ -1,5 +1,9 @@
 """项目路径常量与文件模式。"""
 
+# 路径说明：
+# 源码运行时根目录取项目目录，PyInstaller 运行时根目录取可执行文件所在目录。
+# 所有输入、输出、日志和数据库路径都从 BASE_DIR 派生，避免工作目录变化导致找不到文件。
+
 from __future__ import annotations
 
 import re

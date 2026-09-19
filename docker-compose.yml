@@ -1,4 +1,7 @@
 # CapPhysCombine 容器编排
+# data、logs 和 .cache 使用宿主卷，分别保存输入源文件、运行日志和 Parquet 中间缓存；
+# GeoJSON 目录也挂载进容器，便于不重建镜像直接更新区域数据。数据库卷默认关闭，
+# 因为容器内数据库与结果文件在重建后不会自动保留。
 # 用法：
 #   docker compose up -d                       # 启动 Web 服务
 #   docker compose logs -f                     # 跟踪日志

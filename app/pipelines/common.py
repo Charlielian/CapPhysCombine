@@ -6,6 +6,10 @@ This module is now a backward-compatibility shim that re-exports from:
 - app.pipelines.io        (DuckDB / Excel IO)
 """
 
+# 兼容层说明：
+# common.py 仍是旧调用方使用的公共入口，实际实现已拆到 paths、logging_util 和 io。
+# 新代码应优先从职责明确的子模块导入；这里的 re-export 用于保持历史脚本和外部调用兼容。
+
 from __future__ import annotations
 
 from collections.abc import Iterable

@@ -1,5 +1,9 @@
 """Shared constants re-exports."""
 
+# 常量出口说明：
+# 该模块只重新导出共享业务常量，目的是让旧代码继续使用 app.pipelines.constants。
+# 常量的唯一来源仍是 common.py，避免维护两份频段或距离阈值定义。
+
 from app.pipelines.common import (
     BAND_3DMIMO,
     COVERAGE_LAYER_MAP,

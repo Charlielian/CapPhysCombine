@@ -1,3 +1,6 @@
+# API 说明：
+# 共站同覆盖接口将 HTTP 模型转换为 CogCoverageManager 的数据库操作。
+# Excel 导入涉及阻塞读写，因此读取、临时文件写入和 DuckDB 导入均放到线程池，避免阻塞事件循环。
 from __future__ import annotations
 
 import asyncio

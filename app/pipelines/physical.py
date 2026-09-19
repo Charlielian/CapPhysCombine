@@ -4,6 +4,10 @@
 与 ``from app.pipelines.core import ...`` 等价。
 """
 
+# 兼容层说明：
+# 物理表的完整实现历史上位于 core.py，本模块仅重导出统一实现并补充空间查询入口。
+# 不要在此复制算法；修改物理表逻辑时应先确认 core.py 中的正式实现和调用链。
+
 from app.pipelines.core import (
     PHYSICAL_FILE_PATTERNS,
     PhysicalTableAggregator,

@@ -9,6 +9,10 @@ setup_logging 负责配置 loguru（按天轮转、保留 7 天）并接管标�
 - 未安装 loguru 时自动退化为原标准库实现，保证环境兼容性。
 """
 
+# 日志说明：
+# GuiLogger/GuiProgress 将流水线的日志和进度同时发送到回调与统一日志后端。
+# 回调可由 JobManager 更新任务状态，日志后端则负责控制台输出和按天轮转；二者故障不应改变业务计算。
+
 from __future__ import annotations
 
 import logging

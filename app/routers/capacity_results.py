@@ -1,5 +1,9 @@
 """容量表合成结果查询 API（持久化在统一数据库）。"""
 
+# API 说明：
+# 容量结果查询只读统一数据库中的三张结果表，列表接口负责分页和关键词筛选，
+# 不重新运行流水线；这样页面刷新不会重复执行昂贵的 Excel 导入。
+
 from __future__ import annotations
 
 from fastapi import APIRouter, Query
